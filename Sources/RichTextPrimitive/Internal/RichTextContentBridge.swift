@@ -52,7 +52,7 @@ final class RichTextContentBridge {
     }
 
     func processAttributedText(_ attributedText: NSAttributedString) {
-        let rebuiltBlocks = Self.blocks(from: attributedText.string, preserving: dataSource.blocks)
+        let rebuiltBlocks = Self.blocks(from: attributedText, preserving: dataSource.blocks)
         syncDataSource(with: rebuiltBlocks)
         applyBlocks(dataSource.blocks)
     }
@@ -96,52 +96,93 @@ final class RichTextContentBridge {
         }
     }
 
-    private static func blocks(from plainText: String, preserving existingBlocks: [Block]) -> [Block] {
-        let lines = plainText.components(separatedBy: "\n")
-        return lines.enumerated().map { index, line in
+    private static func blocks(from attributedText: NSAttributedString, preserving existingBlocks: [Block]) -> [Block] {
+        attributedLines(from: attributedText).enumerated().map { index, line in
             let existingBlock = existingBlocks.indices.contains(index) ? existingBlocks[index] : nil
             return block(from: line, existing: existingBlock)
         }
     }
 
-    private static func block(from line: String, existing: Block?) -> Block {
+    private static func block(from line: NSAttributedString, existing: Block?) -> Block {
         guard let existing else {
-            return Block(type: .paragraph, content: .text(.plain(line)))
+            return Block(type: .paragraph, content: .text(textContent(from: line)))
         }
 
         let content = rebuildContent(for: line, existing: existing)
         return Block(id: existing.id, type: existing.type, content: content, metadata: existing.metadata)
     }
 
-    private static func rebuildContent(for line: String, existing: Block) -> BlockContent {
+    private static func rebuildContent(for line: NSAttributedString, existing: Block) -> BlockContent {
+        let textContent = textContent(from: line)
+        let plainLine = line.string
+
         switch existing.content {
         case .text:
-            return .text(TextContent.plain(line))
+            return .text(textContent)
         case let .heading(_, level):
-            return .heading(TextContent.plain(line), level: level)
+            return .heading(textContent, level: level)
         case .blockQuote:
-            return .blockQuote(TextContent.plain(line))
+            return .blockQuote(textContent)
         case let .codeBlock(_, language):
-            return .codeBlock(code: line, language: language)
+            return .codeBlock(code: plainLine, language: language)
         case let .list(_, style, indentLevel):
-            return .list(TextContent.plain(line), style: style, indentLevel: indentLevel)
+            return .list(textContent, style: style, indentLevel: indentLevel)
         case let .table(table):
             return .table(
                 TableContent(
                     rows: table.rows,
                     columnWidths: table.columnWidths,
-                    caption: TextContent.plain(line)
+                    caption: textContent
                 )
             )
         case let .image(image):
             var updatedImage = image
-            updatedImage.altText = line.isEmpty ? image.altText : line
+            updatedImage.altText = plainLine.isEmpty ? image.altText : plainLine
             return .image(updatedImage)
         case .divider:
             return .divider
         case let .embed(embed):
-            return .embed(EmbedContent(kind: embed.kind, payload: line, metadata: embed.metadata))
+            return .embed(EmbedContent(kind: embed.kind, payload: plainLine, metadata: embed.metadata))
         }
+    }
+
+    private static func attributedLines(from attributedText: NSAttributedString) -> [NSAttributedString] {
+        let string = attributedText.string as NSString
+        guard string.length > 0 else {
+            return [NSAttributedString(string: "")]
+        }
+
+        var lines: [NSAttributedString] = []
+        var start = 0
+
+        for location in 0..<string.length where string.character(at: location) == 10 {
+            lines.append(attributedText.attributedSubstring(from: NSRange(location: start, length: location - start)))
+            start = location + 1
+        }
+
+        lines.append(
+            attributedText.attributedSubstring(
+                from: NSRange(location: start, length: string.length - start)
+            )
+        )
+        return lines
+    }
+
+    private static func textContent(from attributedText: NSAttributedString) -> TextContent {
+        guard attributedText.length > 0 else {
+            return .plain("")
+        }
+
+        var runs: [TextRun] = []
+        attributedText.enumerateAttributes(
+            in: NSRange(location: 0, length: attributedText.length),
+            options: []
+        ) { attributes, range, _ in
+            let substring = attributedText.attributedSubstring(from: range).string
+            runs.append(TextRun(text: substring, attributes: textAttributes(from: attributes)))
+        }
+
+        return TextContent(runs: runs)
     }
 
     private static func attributedText(for block: Block) -> NSAttributedString {
@@ -199,8 +240,61 @@ final class RichTextContentBridge {
         if let color = textAttributes.highlightColor {
             attributes[.backgroundColor] = platformColor(from: color)
         }
+        if textAttributes.superscript {
+            attributes[.baselineOffset] = (textAttributes.fontSize ?? 14) * 0.35
+        }
+        if textAttributes.subscript {
+            attributes[.baselineOffset] = -((textAttributes.fontSize ?? 14) * 0.2)
+        }
 
         return attributes
+    }
+
+    private static func textAttributes(from attributes: [NSAttributedString.Key: Any]) -> TextAttributes {
+        var result = TextAttributes.plain
+
+        if let font = attributes[.font] as? PlatformFont {
+            result.fontSize = font.pointSize
+            result.fontFamily = font.familyName
+
+            #if canImport(AppKit)
+            let traits = NSFontManager.shared.traits(of: font)
+            result.bold = traits.contains(.boldFontMask)
+            result.italic = traits.contains(.italicFontMask)
+            result.code = traits.contains(.fixedPitchFontMask) || font.fontName.localizedCaseInsensitiveContains("mono")
+            #else
+            let traits = font.fontDescriptor.symbolicTraits
+            result.bold = traits.contains(.traitBold)
+            result.italic = traits.contains(.traitItalic)
+            result.code = traits.contains(.traitMonoSpace) || font.fontName.localizedCaseInsensitiveContains("mono")
+            #endif
+        }
+
+        let underlineStyle = (attributes[.underlineStyle] as? NSNumber)?.intValue ?? (attributes[.underlineStyle] as? Int) ?? 0
+        let strikethroughStyle = (attributes[.strikethroughStyle] as? NSNumber)?.intValue ?? (attributes[.strikethroughStyle] as? Int) ?? 0
+        result.underline = underlineStyle != 0
+        result.strikethrough = strikethroughStyle != 0
+
+        if let link = attributes[.link] as? URL {
+            result.link = link
+        } else if let link = attributes[.link] as? String {
+            result.link = URL(string: link)
+        }
+
+        if let color = attributes[.foregroundColor] as? PlatformColor {
+            result.color = colorValue(from: color)
+        }
+        if let color = attributes[.backgroundColor] as? PlatformColor {
+            result.highlightColor = colorValue(from: color)
+        }
+
+        let baselineOffset = (attributes[.baselineOffset] as? NSNumber)?.doubleValue
+            ?? (attributes[.baselineOffset] as? Double)
+            ?? 0
+        result.superscript = baselineOffset > 0
+        result.subscript = baselineOffset < 0
+
+        return result
     }
 
     private static func font(for textAttributes: TextAttributes) -> PlatformFont {
@@ -243,5 +337,30 @@ final class RichTextContentBridge {
             alpha: converted.alpha
         )
         #endif
+    }
+
+    private static func colorValue(from color: PlatformColor) -> ColorValue? {
+        #if canImport(AppKit)
+        guard let converted = color.usingColorSpace(.sRGB) else { return nil }
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        converted.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        #else
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard color.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return nil }
+        #endif
+
+        return ColorValue(
+            red: Double(red),
+            green: Double(green),
+            blue: Double(blue),
+            alpha: Double(alpha),
+            colorSpace: .sRGB
+        )
     }
 }
