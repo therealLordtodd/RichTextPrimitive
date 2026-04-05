@@ -6,6 +6,8 @@ final class PlatformRichTextView: NSScrollView, NSTextViewDelegate {
     private let editorTextView = NSTextView()
     private var bridge: RichTextContentBridge?
     private weak var state: RichTextState?
+    private weak var observedDataSource: (any RichTextDataSource)?
+    private var mutationObserverID: UUID?
     private var isApplyingUpdate = false
 
     override init(frame frameRect: NSRect) {
@@ -39,7 +41,15 @@ final class PlatformRichTextView: NSScrollView, NSTextViewDelegate {
         self.state = state
 
         if bridge.map({ ObjectIdentifier($0.dataSource as AnyObject) }) != ObjectIdentifier(dataSource as AnyObject) {
+            if let observedDataSource, let mutationObserverID {
+                observedDataSource.removeMutationObserver(mutationObserverID)
+            }
             bridge = RichTextContentBridge(dataSource: dataSource)
+            observedDataSource = dataSource
+            mutationObserverID = dataSource.addMutationObserver { [weak self] _ in
+                guard let self else { return }
+                self.syncFromBridge()
+            }
         }
 
         syncFromBridge()
