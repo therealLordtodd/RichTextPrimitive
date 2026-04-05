@@ -74,16 +74,23 @@ final class PlatformRichTextView: UITextView, UITextViewDelegate {
         switch state.selection {
         case let .caret(blockID, offset):
             if let location = bridge.characterOffset(for: blockID, offset: offset) {
-                selectedRange = NSRange(location: location, length: 0)
+                applySelectedRange(NSRange(location: location, length: 0))
             }
         case let .range(start, end):
             if let startLocation = bridge.characterOffset(for: start.blockID, offset: start.offset),
                let endLocation = bridge.characterOffset(for: end.blockID, offset: end.offset) {
-                selectedRange = NSRange(location: startLocation, length: max(endLocation - startLocation, 0))
+                applySelectedRange(
+                    NSRange(location: startLocation, length: max(endLocation - startLocation, 0))
+                )
             }
         case .blockSelection:
             break
         }
+    }
+
+    private func applySelectedRange(_ range: NSRange) {
+        selectedRange = range
+        scrollRangeToVisible(range)
     }
 
     private func syncSelectionState() {
