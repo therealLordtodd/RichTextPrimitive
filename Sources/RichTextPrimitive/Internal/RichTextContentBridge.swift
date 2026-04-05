@@ -12,6 +12,8 @@ import ColorPickerPrimitive
 
 @MainActor
 final class RichTextContentBridge {
+    private static let internalLineSeparator = "\u{2028}"
+
     let dataSource: any RichTextDataSource
     let textContentStorage: NSTextContentStorage
 
@@ -115,6 +117,7 @@ final class RichTextContentBridge {
     private static func rebuildContent(for line: NSAttributedString, existing: Block) -> BlockContent {
         let textContent = textContent(from: line)
         let plainLine = line.string
+        let decodedLine = decodeInternalLineSeparators(in: plainLine)
 
         switch existing.content {
         case .text:
@@ -124,7 +127,7 @@ final class RichTextContentBridge {
         case .blockQuote:
             return .blockQuote(textContent)
         case let .codeBlock(_, language):
-            return .codeBlock(code: plainLine, language: language)
+            return .codeBlock(code: decodedLine, language: language)
         case let .list(_, style, indentLevel):
             return .list(textContent, style: style, indentLevel: indentLevel)
         case let .table(table):
@@ -137,12 +140,12 @@ final class RichTextContentBridge {
             )
         case let .image(image):
             var updatedImage = image
-            updatedImage.altText = plainLine.isEmpty ? image.altText : plainLine
+            updatedImage.altText = decodedLine.isEmpty ? image.altText : decodedLine
             return .image(updatedImage)
         case .divider:
             return .divider
         case let .embed(embed):
-            return .embed(EmbedContent(kind: embed.kind, payload: plainLine, metadata: embed.metadata))
+            return .embed(EmbedContent(kind: embed.kind, payload: decodedLine, metadata: embed.metadata))
         }
     }
 
@@ -193,18 +196,18 @@ final class RichTextContentBridge {
              let .list(content, _, _):
             return attributedText(for: content)
         case let .codeBlock(code, _):
-            return NSAttributedString(string: code)
+            return NSAttributedString(string: encodeInternalLineSeparators(in: code))
         case let .table(content):
-            let rendered = content.rows
-                .map { row in row.map(\.plainText).joined(separator: " | ") }
-                .joined(separator: "\n")
+            let rendered = content.caption?.plainText ?? "[Table]"
             return NSAttributedString(string: rendered)
         case let .image(content):
-            return NSAttributedString(string: content.altText ?? "[Image]")
+            return NSAttributedString(string: encodeInternalLineSeparators(in: content.altText ?? "[Image]"))
         case .divider:
             return NSAttributedString(string: "—")
         case let .embed(content):
-            return NSAttributedString(string: content.payload ?? "[\(content.kind)]")
+            return NSAttributedString(
+                string: encodeInternalLineSeparators(in: content.payload ?? "[\(content.kind)]")
+            )
         }
     }
 
@@ -219,6 +222,14 @@ final class RichTextContentBridge {
             )
         }
         return attributed
+    }
+
+    private static func encodeInternalLineSeparators(in string: String) -> String {
+        string.replacingOccurrences(of: "\n", with: internalLineSeparator)
+    }
+
+    private static func decodeInternalLineSeparators(in string: String) -> String {
+        string.replacingOccurrences(of: internalLineSeparator, with: "\n")
     }
 
     private static func attributes(for textAttributes: TextAttributes) -> [NSAttributedString.Key: Any] {

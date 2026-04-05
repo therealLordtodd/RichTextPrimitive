@@ -67,4 +67,20 @@ struct BlockModelTests {
         #expect(content.runs.count == 1)
         #expect(content.plainText == "Hello")
     }
+
+    @Test func textContentSlicingPreservesFormattingAcrossRuns() {
+        let content = TextContent(
+            runs: [
+                TextRun(text: "Bold", attributes: TextAttributes(bold: true)),
+                TextRun(text: "Plain", attributes: .plain),
+            ]
+        )
+
+        let sliced = content.sliced(2..<7)
+
+        #expect(sliced.plainText == "ldPla")
+        #expect(sliced.runs.count == 2)
+        #expect(sliced.runs[0].attributes.bold)
+        #expect(sliced.runs[1].attributes == .plain)
+    }
 }

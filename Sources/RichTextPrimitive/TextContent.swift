@@ -48,11 +48,15 @@ public struct TextContent: Codable, Sendable, Equatable {
         return (TextContent(characters: left), TextContent(characters: right))
     }
 
-    internal func slice(_ range: Range<Int>) -> TextContent {
+    public func sliced(_ range: Range<Int>) -> TextContent {
         let fragments = characters
         let lower = min(max(range.lowerBound, 0), fragments.count)
         let upper = min(max(range.upperBound, lower), fragments.count)
         return TextContent(characters: Array(fragments[lower..<upper]))
+    }
+
+    internal func slice(_ range: Range<Int>) -> TextContent {
+        sliced(range)
     }
 
     internal func replacing(range: Range<Int>, with replacement: TextContent) -> TextContent {

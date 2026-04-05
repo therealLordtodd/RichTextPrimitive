@@ -84,6 +84,59 @@ struct BridgeTests {
         #expect(runs[1].attributes.underline)
         #expect(runs[1].attributes.link?.absoluteString == "https://example.com")
     }
+
+    @Test func multilineCodeBlockRoundTripsAsSingleBlock() {
+        let dataSource = ArrayRichTextDataSource(
+            blocks: [
+                Block(
+                    id: "code",
+                    type: .codeBlock,
+                    content: .codeBlock(code: "let a = 1\nlet b = 2", language: "swift")
+                ),
+            ]
+        )
+
+        let bridge = RichTextContentBridge(dataSource: dataSource)
+        bridge.processAttributedText(bridge.cachedAttributedString)
+
+        #expect(dataSource.blocks.count == 1)
+        if case let .codeBlock(code, language) = dataSource.blocks[0].content {
+            #expect(code == "let a = 1\nlet b = 2")
+            #expect(language == "swift")
+        } else {
+            Issue.record("Expected code block content")
+        }
+    }
+
+    @Test func tableCaptionEditsPreserveTableRows() {
+        let dataSource = ArrayRichTextDataSource(
+            blocks: [
+                Block(
+                    id: "table",
+                    type: .table,
+                    content: .table(
+                        TableContent(
+                            rows: [[.plain("Q1"), .plain("100")]],
+                            columnWidths: [120, 80],
+                            caption: .plain("Revenue")
+                        )
+                    )
+                ),
+            ]
+        )
+
+        let bridge = RichTextContentBridge(dataSource: dataSource)
+        bridge.processAttributedText(NSAttributedString(string: "Updated Revenue"))
+
+        #expect(dataSource.blocks.count == 1)
+        if case let .table(table) = dataSource.blocks[0].content {
+            #expect(table.rows == [[.plain("Q1"), .plain("100")]])
+            #expect(table.columnWidths == [120, 80])
+            #expect(table.caption == .plain("Updated Revenue"))
+        } else {
+            Issue.record("Expected table content")
+        }
+    }
 }
 
 #if canImport(AppKit)
