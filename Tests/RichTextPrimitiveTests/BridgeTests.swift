@@ -36,6 +36,45 @@ struct BridgeTests {
         #expect(rangeStart.offset == 2)
     }
 
+    @Test func blockBoundaryPositionsStayAnchoredToExpectedBlockEdges() {
+        let dataSource = ArrayRichTextDataSource(
+            blocks: [
+                Block(id: "a", type: .paragraph, content: .text(.plain("Alpha"))),
+                Block(id: "b", type: .paragraph, content: .text(.plain("Beta"))),
+            ]
+        )
+
+        let bridge = RichTextContentBridge(dataSource: dataSource, styleSheet: .standard)
+
+        let endOfFirstBlock = try! #require(bridge.blockPosition(forCharacterOffset: 5))
+        #expect(endOfFirstBlock.blockID == "a")
+        #expect(endOfFirstBlock.offset == 5)
+
+        let startOfSecondBlock = try! #require(bridge.blockPosition(forCharacterOffset: 6))
+        #expect(startOfSecondBlock.blockID == "b")
+        #expect(startOfSecondBlock.offset == 0)
+
+        let clampedPastDocumentEnd = try! #require(bridge.blockPosition(forCharacterOffset: 99))
+        #expect(clampedPastDocumentEnd.blockID == "b")
+        #expect(clampedPastDocumentEnd.offset == 4)
+    }
+
+    @Test func textRangeRoundTripsAtEndOfNonFinalBlock() {
+        let dataSource = ArrayRichTextDataSource(
+            blocks: [
+                Block(id: "a", type: .paragraph, content: .text(.plain("Alpha"))),
+                Block(id: "b", type: .paragraph, content: .text(.plain("Beta"))),
+            ]
+        )
+
+        let bridge = RichTextContentBridge(dataSource: dataSource, styleSheet: .standard)
+        let range = try! #require(bridge.textRange(for: "a", offset: 5))
+        let resolved = try! #require(bridge.blockPosition(for: range.location))
+
+        #expect(resolved.blockID == "a")
+        #expect(resolved.offset == 5)
+    }
+
     @Test func editedTextRoundTripsBackIntoBlocks() {
         let dataSource = ArrayRichTextDataSource(
             blocks: [

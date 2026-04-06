@@ -84,22 +84,42 @@ final class RichTextContentBridge {
     }
 
     func blockPosition(forCharacterOffset offset: Int) -> TextPosition? {
-        for (blockID, range) in blockRanges.sorted(by: { $0.value.lowerBound < $1.value.lowerBound }) {
-            if range.contains(offset) {
-                return TextPosition(blockID: blockID, offset: offset - range.lowerBound)
+        let sortedRanges = blockRanges.sorted(by: { $0.value.lowerBound < $1.value.lowerBound })
+        guard let first = sortedRanges.first else { return nil }
+
+        var previous = first
+        for entry in sortedRanges {
+            let (blockID, range) = entry
+            if range.contains(offset) || offset == range.upperBound {
+                return TextPosition(
+                    blockID: blockID,
+                    offset: clampedBlockOffset(for: offset, in: range)
+                )
             }
+
+            if offset < range.lowerBound {
+                return TextPosition(
+                    blockID: previous.key,
+                    offset: clampedBlockOffset(for: offset, in: previous.value)
+                )
+            }
+
+            previous = entry
         }
 
-        if let last = blockRanges.max(by: { $0.value.upperBound < $1.value.upperBound }) {
-            return TextPosition(blockID: last.key, offset: max(offset - last.value.lowerBound, 0))
-        }
-
-        return nil
+        return TextPosition(
+            blockID: previous.key,
+            offset: clampedBlockOffset(for: offset, in: previous.value)
+        )
     }
 
     func characterOffset(for blockID: BlockID, offset: Int) -> Int? {
         guard let range = blockRanges[blockID] else { return nil }
         return min(range.lowerBound + max(offset, 0), range.upperBound)
+    }
+
+    private func clampedBlockOffset(for characterOffset: Int, in range: Range<Int>) -> Int {
+        min(max(characterOffset - range.lowerBound, 0), range.count)
     }
 
     private func syncDataSource(with blocks: [Block]) {
