@@ -13,6 +13,8 @@ import ColorPickerPrimitive
 @MainActor
 final class RichTextContentBridge {
     private static let internalLineSeparator = "\u{2028}"
+    private static let metadataEncoder = JSONEncoder()
+    private static let metadataDecoder = JSONDecoder()
 
     let dataSource: any RichTextDataSource
     let textContentStorage: NSTextContentStorage
@@ -99,9 +101,42 @@ final class RichTextContentBridge {
     }
 
     private static func blocks(from attributedText: NSAttributedString, preserving existingBlocks: [Block]) -> [Block] {
-        attributedLines(from: attributedText).enumerated().map { index, line in
-            let existingBlock = existingBlocks.indices.contains(index) ? existingBlocks[index] : nil
-            return block(from: line, existing: existingBlock)
+        let existingByID = Dictionary(uniqueKeysWithValues: existingBlocks.map { ($0.id, $0) })
+        let lines = attributedLines(from: attributedText)
+        var reuseCountBySourceID: [BlockID: Int] = [:]
+        var lastProducedBlockBySourceID: [BlockID: Block] = [:]
+
+        return lines.enumerated().map { index, line in
+            let descriptor = blockDescriptor(from: line.representativeAttributes)
+            let sourceBlock = descriptor?.blockID.flatMap { existingByID[$0] }
+                ?? (existingBlocks.indices.contains(index) ? existingBlocks[index] : nil)
+
+            if let sourceBlock {
+                let sourceID = descriptor?.blockID ?? sourceBlock.id
+                let occurrence = reuseCountBySourceID[sourceID, default: 0]
+                reuseCountBySourceID[sourceID] = occurrence + 1
+
+                let template = if occurrence == 0 {
+                    sourceBlock
+                } else {
+                    splitSuccessorTemplate(for: lastProducedBlockBySourceID[sourceID] ?? sourceBlock)
+                }
+
+                let rebuilt = block(from: line.attributedString, existing: template)
+                lastProducedBlockBySourceID[sourceID] = rebuilt
+
+                if occurrence == 0 {
+                    return rebuilt
+                }
+
+                return Block(type: rebuilt.type, content: rebuilt.content, metadata: rebuilt.metadata)
+            }
+
+            if let descriptor {
+                return block(from: line.attributedString, descriptor: descriptor)
+            }
+
+            return Block(type: .paragraph, content: .text(textContent(from: line.attributedString)))
         }
     }
 
@@ -112,6 +147,12 @@ final class RichTextContentBridge {
 
         let content = rebuildContent(for: line, existing: existing)
         return Block(id: existing.id, type: existing.type, content: content, metadata: existing.metadata)
+    }
+
+    private static func block(from line: NSAttributedString, descriptor: BlockDescriptor) -> Block {
+        let template = descriptor.templateBlock
+        let content = rebuildContent(for: line, existing: template)
+        return Block(type: template.type, content: content, metadata: template.metadata)
     }
 
     private static func rebuildContent(for line: NSAttributedString, existing: Block) -> BlockContent {
@@ -149,23 +190,37 @@ final class RichTextContentBridge {
         }
     }
 
-    private static func attributedLines(from attributedText: NSAttributedString) -> [NSAttributedString] {
+    private static func attributedLines(from attributedText: NSAttributedString) -> [AttributedLine] {
         let string = attributedText.string as NSString
         guard string.length > 0 else {
-            return [NSAttributedString(string: "")]
+            return [AttributedLine(attributedString: NSAttributedString(string: ""), representativeAttributes: [:])]
         }
 
-        var lines: [NSAttributedString] = []
+        var lines: [AttributedLine] = []
         var start = 0
 
         for location in 0..<string.length where string.character(at: location) == 10 {
-            lines.append(attributedText.attributedSubstring(from: NSRange(location: start, length: location - start)))
+            let range = NSRange(location: start, length: location - start)
+            lines.append(
+                AttributedLine(
+                    attributedString: attributedText.attributedSubstring(from: range),
+                    representativeAttributes: representativeAttributes(
+                        in: attributedText,
+                        lineRange: range
+                    )
+                )
+            )
             start = location + 1
         }
 
+        let finalRange = NSRange(location: start, length: string.length - start)
         lines.append(
-            attributedText.attributedSubstring(
-                from: NSRange(location: start, length: string.length - start)
+            AttributedLine(
+                attributedString: attributedText.attributedSubstring(from: finalRange),
+                representativeAttributes: representativeAttributes(
+                    in: attributedText,
+                    lineRange: finalRange
+                )
             )
         )
         return lines
@@ -189,35 +244,48 @@ final class RichTextContentBridge {
     }
 
     private static func attributedText(for block: Block) -> NSAttributedString {
+        let blockAttributes = blockAttributes(for: block)
         switch block.content {
         case let .text(content),
              let .heading(content, _),
              let .blockQuote(content),
              let .list(content, _, _):
-            return attributedText(for: content)
+            return attributedText(for: content, blockAttributes: blockAttributes)
         case let .codeBlock(code, _):
-            return NSAttributedString(string: encodeInternalLineSeparators(in: code))
+            return NSAttributedString(
+                string: encodeInternalLineSeparators(in: code),
+                attributes: blockAttributes
+            )
         case let .table(content):
             let rendered = content.caption?.plainText ?? "[Table]"
-            return NSAttributedString(string: rendered)
+            return NSAttributedString(string: rendered, attributes: blockAttributes)
         case let .image(content):
-            return NSAttributedString(string: encodeInternalLineSeparators(in: content.altText ?? "[Image]"))
+            return NSAttributedString(
+                string: encodeInternalLineSeparators(in: content.altText ?? "[Image]"),
+                attributes: blockAttributes
+            )
         case .divider:
-            return NSAttributedString(string: "—")
+            return NSAttributedString(string: "—", attributes: blockAttributes)
         case let .embed(content):
             return NSAttributedString(
-                string: encodeInternalLineSeparators(in: content.payload ?? "[\(content.kind)]")
+                string: encodeInternalLineSeparators(in: content.payload ?? "[\(content.kind)]"),
+                attributes: blockAttributes
             )
         }
     }
 
-    private static func attributedText(for content: TextContent) -> NSAttributedString {
+    private static func attributedText(
+        for content: TextContent,
+        blockAttributes: [NSAttributedString.Key: Any]
+    ) -> NSAttributedString {
         let attributed = NSMutableAttributedString()
         for run in content.runs {
+            var attributes = attributes(for: run.attributes)
+            blockAttributes.forEach { attributes[$0.key] = $0.value }
             attributed.append(
                 NSAttributedString(
                     string: run.text,
-                    attributes: attributes(for: run.attributes)
+                    attributes: attributes
                 )
             )
         }
@@ -259,6 +327,71 @@ final class RichTextContentBridge {
         }
 
         return attributes
+    }
+
+    private static func blockAttributes(for block: Block) -> [NSAttributedString.Key: Any] {
+        var attributes: [NSAttributedString.Key: Any] = [
+            .richTextBlockID: block.id.rawValue,
+            .richTextBlockType: block.type.rawValue,
+        ]
+
+        if let metadata = try? metadataEncoder.encode(block.metadata) {
+            attributes[.richTextBlockMetadata] = metadata
+        }
+
+        return attributes
+    }
+
+    private static func representativeAttributes(
+        in attributedText: NSAttributedString,
+        lineRange: NSRange
+    ) -> [NSAttributedString.Key: Any] {
+        if lineRange.length > 0 {
+            return attributedText.attributes(at: lineRange.location, effectiveRange: nil)
+        }
+
+        if lineRange.location > 0 {
+            return attributedText.attributes(at: lineRange.location - 1, effectiveRange: nil)
+        }
+
+        if attributedText.length > 0 {
+            return attributedText.attributes(at: 0, effectiveRange: nil)
+        }
+
+        return [:]
+    }
+
+    private static func blockDescriptor(from attributes: [NSAttributedString.Key: Any]) -> BlockDescriptor? {
+        let blockID = (attributes[.richTextBlockID] as? String).map { BlockID($0) }
+        let blockType = (attributes[.richTextBlockType] as? String).flatMap(BlockType.init(rawValue:))
+        let metadata: BlockMetadata? = {
+            guard let data = attributes[.richTextBlockMetadata] as? Data else { return nil }
+            return try? metadataDecoder.decode(BlockMetadata.self, from: data)
+        }()
+
+        guard blockID != nil || blockType != nil || metadata != nil else { return nil }
+        return BlockDescriptor(
+            blockID: blockID,
+            blockType: blockType ?? .paragraph,
+            metadata: metadata ?? BlockMetadata()
+        )
+    }
+
+    private static func splitSuccessorTemplate(for block: Block) -> Block {
+        switch block.content {
+        case .text:
+            return Block(type: .paragraph, content: .text(.plain("")), metadata: block.metadata)
+        case .heading:
+            return Block(type: .paragraph, content: .text(.plain("")))
+        case .blockQuote:
+            return Block(type: .blockQuote, content: .blockQuote(.plain("")), metadata: block.metadata)
+        case let .codeBlock(_, language):
+            return Block(type: .codeBlock, content: .codeBlock(code: "", language: language), metadata: block.metadata)
+        case let .list(_, style, indentLevel):
+            return Block(type: .list, content: .list(.plain(""), style: style, indentLevel: indentLevel), metadata: block.metadata)
+        case .table, .image, .divider, .embed:
+            return Block(type: .paragraph, content: .text(.plain("")))
+        }
     }
 
     private static func textAttributes(from attributes: [NSAttributedString.Key: Any]) -> TextAttributes {
@@ -374,4 +507,44 @@ final class RichTextContentBridge {
             colorSpace: .sRGB
         )
     }
+}
+
+private struct AttributedLine {
+    let attributedString: NSAttributedString
+    let representativeAttributes: [NSAttributedString.Key: Any]
+}
+
+private struct BlockDescriptor {
+    let blockID: BlockID?
+    let blockType: BlockType
+    let metadata: BlockMetadata
+
+    var templateBlock: Block {
+        switch blockType {
+        case .paragraph:
+            Block(type: .paragraph, content: .text(.plain("")), metadata: metadata)
+        case .heading:
+            Block(type: .heading, content: .heading(.plain(""), level: 1), metadata: metadata)
+        case .blockQuote:
+            Block(type: .blockQuote, content: .blockQuote(.plain("")), metadata: metadata)
+        case .codeBlock:
+            Block(type: .codeBlock, content: .codeBlock(code: "", language: nil), metadata: metadata)
+        case .list:
+            Block(type: .list, content: .list(.plain(""), style: .bullet, indentLevel: 0), metadata: metadata)
+        case .table:
+            Block(type: .table, content: .table(TableContent(rows: [], caption: .plain(""))), metadata: metadata)
+        case .image:
+            Block(type: .image, content: .image(ImageContent(altText: "")), metadata: metadata)
+        case .divider:
+            Block(type: .divider, content: .divider, metadata: metadata)
+        case .embed:
+            Block(type: .embed, content: .embed(EmbedContent(kind: "embed", payload: "")), metadata: metadata)
+        }
+    }
+}
+
+private extension NSAttributedString.Key {
+    static let richTextBlockID = NSAttributedString.Key("RichTextPrimitive.blockID")
+    static let richTextBlockType = NSAttributedString.Key("RichTextPrimitive.blockType")
+    static let richTextBlockMetadata = NSAttributedString.Key("RichTextPrimitive.blockMetadata")
 }
