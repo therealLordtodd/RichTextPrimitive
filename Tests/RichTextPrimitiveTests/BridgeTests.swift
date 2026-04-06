@@ -24,6 +24,11 @@ struct BridgeTests {
         #expect(bridge.cachedAttributedString.string == "Title\nBody")
         #expect(bridge.blockPosition(forCharacterOffset: 0)?.blockID == "a")
         #expect(bridge.blockPosition(forCharacterOffset: 6)?.blockID == "b")
+
+        let range = try! #require(bridge.textRange(for: "b", offset: 2))
+        let rangeStart = try! #require(bridge.blockPosition(for: range.location))
+        #expect(rangeStart.blockID == "b")
+        #expect(rangeStart.offset == 2)
     }
 
     @Test func editedTextRoundTripsBackIntoBlocks() {

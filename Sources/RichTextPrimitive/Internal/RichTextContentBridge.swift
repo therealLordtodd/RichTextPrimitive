@@ -62,14 +62,14 @@ final class RichTextContentBridge {
     }
 
     func textRange(for blockID: BlockID, offset: Int) -> NSTextRange? {
-        _ = blockID
-        _ = offset
-        return nil
+        guard let characterOffset = characterOffset(for: blockID, offset: offset) else { return nil }
+        let location = BridgeTextLocation(offset: characterOffset)
+        return NSTextRange(location: location, end: location)
     }
 
     func blockPosition(for location: NSTextLocation) -> TextPosition? {
-        _ = location
-        return nil
+        guard let location = location as? BridgeTextLocation else { return nil }
+        return blockPosition(forCharacterOffset: location.offset)
     }
 
     func blockPosition(forCharacterOffset offset: Int) -> TextPosition? {
@@ -540,6 +540,27 @@ private struct BlockDescriptor {
         case .embed:
             Block(type: .embed, content: .embed(EmbedContent(kind: "embed", payload: "")), metadata: metadata)
         }
+    }
+}
+
+private final class BridgeTextLocation: NSObject, NSTextLocation {
+    let offset: Int
+
+    init(offset: Int) {
+        self.offset = offset
+    }
+
+    func compare(_ location: any NSTextLocation) -> ComparisonResult {
+        guard let other = location as? BridgeTextLocation else {
+            return .orderedSame
+        }
+        if offset < other.offset {
+            return .orderedAscending
+        }
+        if offset > other.offset {
+            return .orderedDescending
+        }
+        return .orderedSame
     }
 }
 
