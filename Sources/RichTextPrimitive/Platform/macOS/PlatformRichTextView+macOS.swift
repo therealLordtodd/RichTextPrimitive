@@ -37,20 +37,21 @@ final class PlatformRichTextView: NSScrollView, NSTextViewDelegate {
         dataSource: any RichTextDataSource,
         styleSheet: TextStyleSheet
     ) {
-        _ = styleSheet
         self.state = state
 
         if bridge.map({ ObjectIdentifier($0.dataSource as AnyObject) }) != ObjectIdentifier(dataSource as AnyObject) {
             if let observedDataSource, let mutationObserverID {
                 observedDataSource.removeMutationObserver(mutationObserverID)
             }
-            bridge = RichTextContentBridge(dataSource: dataSource)
+            bridge = RichTextContentBridge(dataSource: dataSource, styleSheet: styleSheet)
             observedDataSource = dataSource
             mutationObserverID = dataSource.addMutationObserver { [weak self] _ in
                 guard let self else { return }
                 self.syncFromBridge()
             }
         }
+
+        bridge?.updateStyleSheet(styleSheet)
 
         syncFromBridge()
     }

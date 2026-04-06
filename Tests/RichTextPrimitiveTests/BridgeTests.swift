@@ -1,10 +1,15 @@
 import Foundation
 import Testing
 @testable import RichTextPrimitive
+import ColorPickerPrimitive
 #if canImport(AppKit)
 import AppKit
+private typealias TestPlatformFont = NSFont
+private typealias TestPlatformColor = NSColor
 #elseif canImport(UIKit)
 import UIKit
+private typealias TestPlatformFont = UIFont
+private typealias TestPlatformColor = UIColor
 #endif
 
 @MainActor
@@ -18,7 +23,7 @@ struct BridgeTests {
             ]
         )
 
-        let bridge = RichTextContentBridge(dataSource: dataSource)
+        let bridge = RichTextContentBridge(dataSource: dataSource, styleSheet: .standard)
         bridge.applyBlocks(dataSource.blocks)
 
         #expect(bridge.cachedAttributedString.string == "Title\nBody")
@@ -39,7 +44,7 @@ struct BridgeTests {
             ]
         )
 
-        let bridge = RichTextContentBridge(dataSource: dataSource)
+        let bridge = RichTextContentBridge(dataSource: dataSource, styleSheet: .standard)
         bridge.processAttributedText(NSAttributedString(string: "Alpha\nBeta\nGamma"))
 
         #expect(dataSource.blocks.count == 3)
@@ -66,7 +71,7 @@ struct BridgeTests {
             ]
         )
 
-        let bridge = RichTextContentBridge(dataSource: dataSource)
+        let bridge = RichTextContentBridge(dataSource: dataSource, styleSheet: .standard)
         let attributed = NSMutableAttributedString(attributedString: bridge.cachedAttributedString)
         let insertedAttributes = attributed.attributes(at: 0, effectiveRange: nil)
         attributed.insert(NSAttributedString(string: "\nGamma", attributes: insertedAttributes), at: 5)
@@ -101,7 +106,7 @@ struct BridgeTests {
             ]
         )
 
-        let bridge = RichTextContentBridge(dataSource: dataSource)
+        let bridge = RichTextContentBridge(dataSource: dataSource, styleSheet: .standard)
         let attributed = NSMutableAttributedString(attributedString: bridge.cachedAttributedString)
         attributed.deleteCharacters(in: NSRange(location: 5, length: 1))
 
@@ -122,7 +127,7 @@ struct BridgeTests {
             ]
         )
 
-        let bridge = RichTextContentBridge(dataSource: dataSource)
+        let bridge = RichTextContentBridge(dataSource: dataSource, styleSheet: .standard)
         let attributed = NSMutableAttributedString()
         attributed.append(
             NSAttributedString(
@@ -168,7 +173,7 @@ struct BridgeTests {
             ]
         )
 
-        let bridge = RichTextContentBridge(dataSource: dataSource)
+        let bridge = RichTextContentBridge(dataSource: dataSource, styleSheet: .standard)
         bridge.processAttributedText(bridge.cachedAttributedString)
 
         #expect(dataSource.blocks.count == 1)
@@ -197,7 +202,7 @@ struct BridgeTests {
             ]
         )
 
-        let bridge = RichTextContentBridge(dataSource: dataSource)
+        let bridge = RichTextContentBridge(dataSource: dataSource, styleSheet: .standard)
         bridge.processAttributedText(NSAttributedString(string: "Updated Revenue"))
 
         #expect(dataSource.blocks.count == 1)
@@ -208,6 +213,42 @@ struct BridgeTests {
         } else {
             Issue.record("Expected table content")
         }
+    }
+
+    @Test func styleSheetAppliesBlockDefaultsWithoutPersistingInlineOverrides() {
+        let styleSheet = TextStyleSheet(
+            defaultStyle: ParagraphStyle(fontFamily: "Helvetica", fontSize: 15, textColor: ColorValue(red: 0.2, green: 0.2, blue: 0.2)),
+            headingStyles: [
+                1: ParagraphStyle(
+                    fontFamily: "Helvetica",
+                    fontSize: 32,
+                    fontWeight: .bold,
+                    paragraphSpacing: 18,
+                    textColor: ColorValue(red: 0.8, green: 0.1, blue: 0.1)
+                ),
+            ]
+        )
+        let dataSource = ArrayRichTextDataSource(
+            blocks: [
+                Block(id: "heading", type: .heading, content: .heading(.plain("Styled"), level: 1)),
+            ]
+        )
+
+        let bridge = RichTextContentBridge(dataSource: dataSource, styleSheet: styleSheet)
+        let attributes = bridge.cachedAttributedString.attributes(at: 0, effectiveRange: nil)
+        let font = try! #require(attributes[.font] as? TestPlatformFont)
+        let color = try! #require(attributes[.foregroundColor] as? TestPlatformColor)
+        let paragraphStyle = try! #require(attributes[.paragraphStyle] as? NSParagraphStyle)
+
+        #expect(abs(font.pointSize - 32) < 0.1)
+        #expect(isBold(font))
+        #expect(platformColorValue(color) == ColorValue(red: 0.8, green: 0.1, blue: 0.1))
+        #expect(abs(paragraphStyle.paragraphSpacing - 18) < 0.1)
+
+        bridge.processAttributedText(bridge.cachedAttributedString)
+
+        let run = try! #require(dataSource.blocks[0].content.textContent?.runs.first)
+        #expect(run.attributes == .plain)
     }
 }
 
@@ -223,6 +264,20 @@ private func italicFont(ofSize size: CGFloat) -> NSFont {
 private func platformColor(red: CGFloat, green: CGFloat, blue: CGFloat) -> NSColor {
     NSColor(calibratedRed: red, green: green, blue: blue, alpha: 1)
 }
+
+private func isBold(_ font: NSFont) -> Bool {
+    NSFontManager.shared.traits(of: font).contains(.boldFontMask)
+}
+
+private func platformColorValue(_ color: NSColor) -> ColorValue? {
+    guard let converted = color.usingColorSpace(.sRGB) else { return nil }
+    var red: CGFloat = 0
+    var green: CGFloat = 0
+    var blue: CGFloat = 0
+    var alpha: CGFloat = 0
+    converted.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+    return ColorValue(red: Double(red), green: Double(green), blue: Double(blue), alpha: Double(alpha))
+}
 #elseif canImport(UIKit)
 private func boldFont(ofSize size: CGFloat) -> UIFont {
     UIFont.boldSystemFont(ofSize: size)
@@ -234,5 +289,18 @@ private func italicFont(ofSize size: CGFloat) -> UIFont {
 
 private func platformColor(red: CGFloat, green: CGFloat, blue: CGFloat) -> UIColor {
     UIColor(red: red, green: green, blue: blue, alpha: 1)
+}
+
+private func isBold(_ font: UIFont) -> Bool {
+    font.fontDescriptor.symbolicTraits.contains(.traitBold)
+}
+
+private func platformColorValue(_ color: UIColor) -> ColorValue? {
+    var red: CGFloat = 0
+    var green: CGFloat = 0
+    var blue: CGFloat = 0
+    var alpha: CGFloat = 0
+    guard color.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else { return nil }
+    return ColorValue(red: Double(red), green: Double(green), blue: Double(blue), alpha: Double(alpha))
 }
 #endif

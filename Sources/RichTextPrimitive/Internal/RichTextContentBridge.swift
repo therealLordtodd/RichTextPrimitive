@@ -9,6 +9,7 @@ private typealias PlatformColor = UIColor
 #endif
 import Foundation
 import ColorPickerPrimitive
+import TypographyPrimitive
 
 @MainActor
 final class RichTextContentBridge {
@@ -18,14 +19,20 @@ final class RichTextContentBridge {
 
     let dataSource: any RichTextDataSource
     let textContentStorage: NSTextContentStorage
+    private(set) var styleSheet: TextStyleSheet
 
     private(set) var blockRanges: [BlockID: Range<Int>] = [:]
     private(set) var cachedAttributedString = NSAttributedString(string: "")
 
-    init(dataSource: any RichTextDataSource) {
+    init(dataSource: any RichTextDataSource, styleSheet: TextStyleSheet) {
         self.dataSource = dataSource
+        self.styleSheet = styleSheet
         self.textContentStorage = NSTextContentStorage()
         applyBlocks(dataSource.blocks)
+    }
+
+    func updateStyleSheet(_ styleSheet: TextStyleSheet) {
+        self.styleSheet = styleSheet
     }
 
     func applyBlocks(_ blocks: [Block]) {
@@ -34,7 +41,7 @@ final class RichTextContentBridge {
         var location = 0
 
         for (index, block) in blocks.enumerated() {
-            let blockString = Self.attributedText(for: block)
+            let blockString = attributedText(for: block)
             attributed.append(blockString)
             let blockLength = blockString.string.count
             ranges[block.id] = location..<(location + blockLength)
@@ -56,7 +63,11 @@ final class RichTextContentBridge {
     }
 
     func processAttributedText(_ attributedText: NSAttributedString) {
-        let rebuiltBlocks = Self.blocks(from: attributedText, preserving: dataSource.blocks)
+        let rebuiltBlocks = Self.blocks(
+            from: attributedText,
+            preserving: dataSource.blocks,
+            styleSheet: styleSheet
+        )
         syncDataSource(with: rebuiltBlocks)
         applyBlocks(dataSource.blocks)
     }
@@ -100,7 +111,11 @@ final class RichTextContentBridge {
         }
     }
 
-    private static func blocks(from attributedText: NSAttributedString, preserving existingBlocks: [Block]) -> [Block] {
+    private static func blocks(
+        from attributedText: NSAttributedString,
+        preserving existingBlocks: [Block],
+        styleSheet: TextStyleSheet
+    ) -> [Block] {
         let existingByID = Dictionary(uniqueKeysWithValues: existingBlocks.map { ($0.id, $0) })
         let lines = attributedLines(from: attributedText)
         var reuseCountBySourceID: [BlockID: Int] = [:]
@@ -122,7 +137,7 @@ final class RichTextContentBridge {
                     splitSuccessorTemplate(for: lastProducedBlockBySourceID[sourceID] ?? sourceBlock)
                 }
 
-                let rebuilt = block(from: line.attributedString, existing: template)
+                let rebuilt = block(from: line.attributedString, existing: template, styleSheet: styleSheet)
                 lastProducedBlockBySourceID[sourceID] = rebuilt
 
                 if occurrence == 0 {
@@ -133,30 +148,51 @@ final class RichTextContentBridge {
             }
 
             if let descriptor {
-                return block(from: line.attributedString, descriptor: descriptor)
+                return block(from: line.attributedString, descriptor: descriptor, styleSheet: styleSheet)
             }
 
-            return Block(type: .paragraph, content: .text(textContent(from: line.attributedString)))
+            return block(
+                from: line.attributedString,
+                existing: Block(type: .paragraph, content: .text(.plain(""))),
+                styleSheet: styleSheet
+            )
         }
     }
 
-    private static func block(from line: NSAttributedString, existing: Block?) -> Block {
+    private static func block(
+        from line: NSAttributedString,
+        existing: Block?,
+        styleSheet: TextStyleSheet
+    ) -> Block {
         guard let existing else {
-            return Block(type: .paragraph, content: .text(textContent(from: line)))
+            let fallback = Block(type: .paragraph, content: .text(.plain("")))
+            let content = rebuildContent(for: line, existing: fallback, styleSheet: styleSheet)
+            return Block(type: .paragraph, content: content)
         }
 
-        let content = rebuildContent(for: line, existing: existing)
+        let content = rebuildContent(for: line, existing: existing, styleSheet: styleSheet)
         return Block(id: existing.id, type: existing.type, content: content, metadata: existing.metadata)
     }
 
-    private static func block(from line: NSAttributedString, descriptor: BlockDescriptor) -> Block {
+    private static func block(
+        from line: NSAttributedString,
+        descriptor: BlockDescriptor,
+        styleSheet: TextStyleSheet
+    ) -> Block {
         let template = descriptor.templateBlock
-        let content = rebuildContent(for: line, existing: template)
+        let content = rebuildContent(for: line, existing: template, styleSheet: styleSheet)
         return Block(type: template.type, content: content, metadata: template.metadata)
     }
 
-    private static func rebuildContent(for line: NSAttributedString, existing: Block) -> BlockContent {
-        let textContent = textContent(from: line)
+    private static func rebuildContent(
+        for line: NSAttributedString,
+        existing: Block,
+        styleSheet: TextStyleSheet
+    ) -> BlockContent {
+        let textContent = textContent(
+            from: line,
+            defaultStyle: styleSheet.style(for: existing)
+        )
         let plainLine = line.string
         let decodedLine = decodeInternalLineSeparators(in: plainLine)
 
@@ -226,7 +262,10 @@ final class RichTextContentBridge {
         return lines
     }
 
-    private static func textContent(from attributedText: NSAttributedString) -> TextContent {
+    private static func textContent(
+        from attributedText: NSAttributedString,
+        defaultStyle: ParagraphStyle
+    ) -> TextContent {
         guard attributedText.length > 0 else {
             return .plain("")
         }
@@ -237,23 +276,33 @@ final class RichTextContentBridge {
             options: []
         ) { attributes, range, _ in
             let substring = attributedText.attributedSubstring(from: range).string
-            runs.append(TextRun(text: substring, attributes: textAttributes(from: attributes)))
+            runs.append(
+                TextRun(
+                    text: substring,
+                    attributes: textAttributes(from: attributes, defaultStyle: defaultStyle)
+                )
+            )
         }
 
         return TextContent(runs: runs)
     }
 
-    private static func attributedText(for block: Block) -> NSAttributedString {
-        let blockAttributes = blockAttributes(for: block)
+    private func attributedText(for block: Block) -> NSAttributedString {
+        let paragraphStyle = styleSheet.style(for: block)
+        let blockAttributes = Self.blockAttributes(for: block, paragraphStyle: paragraphStyle)
         switch block.content {
         case let .text(content),
              let .heading(content, _),
              let .blockQuote(content),
              let .list(content, _, _):
-            return attributedText(for: content, blockAttributes: blockAttributes)
+            return Self.attributedText(
+                for: content,
+                blockAttributes: blockAttributes,
+                defaultStyle: paragraphStyle
+            )
         case let .codeBlock(code, _):
             return NSAttributedString(
-                string: encodeInternalLineSeparators(in: code),
+                string: Self.encodeInternalLineSeparators(in: code),
                 attributes: blockAttributes
             )
         case let .table(content):
@@ -261,14 +310,14 @@ final class RichTextContentBridge {
             return NSAttributedString(string: rendered, attributes: blockAttributes)
         case let .image(content):
             return NSAttributedString(
-                string: encodeInternalLineSeparators(in: content.altText ?? "[Image]"),
+                string: Self.encodeInternalLineSeparators(in: content.altText ?? "[Image]"),
                 attributes: blockAttributes
             )
         case .divider:
             return NSAttributedString(string: "—", attributes: blockAttributes)
         case let .embed(content):
             return NSAttributedString(
-                string: encodeInternalLineSeparators(in: content.payload ?? "[\(content.kind)]"),
+                string: Self.encodeInternalLineSeparators(in: content.payload ?? "[\(content.kind)]"),
                 attributes: blockAttributes
             )
         }
@@ -276,11 +325,12 @@ final class RichTextContentBridge {
 
     private static func attributedText(
         for content: TextContent,
-        blockAttributes: [NSAttributedString.Key: Any]
+        blockAttributes: [NSAttributedString.Key: Any],
+        defaultStyle: ParagraphStyle
     ) -> NSAttributedString {
         let attributed = NSMutableAttributedString()
         for run in content.runs {
-            var attributes = attributes(for: run.attributes)
+            var attributes = attributes(for: run.attributes, defaultStyle: defaultStyle)
             blockAttributes.forEach { attributes[$0.key] = $0.value }
             attributed.append(
                 NSAttributedString(
@@ -300,9 +350,12 @@ final class RichTextContentBridge {
         string.replacingOccurrences(of: internalLineSeparator, with: "\n")
     }
 
-    private static func attributes(for textAttributes: TextAttributes) -> [NSAttributedString.Key: Any] {
+    private static func attributes(
+        for textAttributes: TextAttributes,
+        defaultStyle: ParagraphStyle
+    ) -> [NSAttributedString.Key: Any] {
         var attributes: [NSAttributedString.Key: Any] = [:]
-        attributes[.font] = font(for: textAttributes)
+        attributes[.font] = font(for: textAttributes, defaultStyle: defaultStyle)
 
         if textAttributes.underline {
             attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
@@ -320,19 +373,25 @@ final class RichTextContentBridge {
             attributes[.backgroundColor] = platformColor(from: color)
         }
         if textAttributes.superscript {
-            attributes[.baselineOffset] = (textAttributes.fontSize ?? 14) * 0.35
+            attributes[.baselineOffset] = (textAttributes.fontSize ?? defaultStyle.fontSize) * 0.35
         }
         if textAttributes.subscript {
-            attributes[.baselineOffset] = -((textAttributes.fontSize ?? 14) * 0.2)
+            attributes[.baselineOffset] = -((textAttributes.fontSize ?? defaultStyle.fontSize) * 0.2)
         }
 
         return attributes
     }
 
-    private static func blockAttributes(for block: Block) -> [NSAttributedString.Key: Any] {
+    private static func blockAttributes(
+        for block: Block,
+        paragraphStyle: ParagraphStyle
+    ) -> [NSAttributedString.Key: Any] {
         var attributes: [NSAttributedString.Key: Any] = [
             .richTextBlockID: block.id.rawValue,
             .richTextBlockType: block.type.rawValue,
+            .font: font(for: .plain, defaultStyle: paragraphStyle),
+            .paragraphStyle: nsParagraphStyle(from: paragraphStyle),
+            .foregroundColor: platformColor(from: paragraphStyle.textColor),
         ]
 
         if let metadata = try? metadataEncoder.encode(block.metadata) {
@@ -394,24 +453,24 @@ final class RichTextContentBridge {
         }
     }
 
-    private static func textAttributes(from attributes: [NSAttributedString.Key: Any]) -> TextAttributes {
+    private static func textAttributes(
+        from attributes: [NSAttributedString.Key: Any],
+        defaultStyle: ParagraphStyle
+    ) -> TextAttributes {
         var result = TextAttributes.plain
 
         if let font = attributes[.font] as? PlatformFont {
-            result.fontSize = font.pointSize
-            result.fontFamily = font.familyName
-
-            #if canImport(AppKit)
-            let traits = NSFontManager.shared.traits(of: font)
-            result.bold = traits.contains(.boldFontMask)
-            result.italic = traits.contains(.italicFontMask)
-            result.code = traits.contains(.fixedPitchFontMask) || font.fontName.localizedCaseInsensitiveContains("mono")
-            #else
-            let traits = font.fontDescriptor.symbolicTraits
-            result.bold = traits.contains(.traitBold)
-            result.italic = traits.contains(.traitItalic)
-            result.code = traits.contains(.traitMonoSpace) || font.fontName.localizedCaseInsensitiveContains("mono")
-            #endif
+            let traits = fontTraits(for: font)
+            let familyName = font.familyName ?? ""
+            if abs(font.pointSize - defaultStyle.fontSize) > 0.1 {
+                result.fontSize = font.pointSize
+            }
+            if !familyName.localizedCaseInsensitiveContains(defaultStyle.fontFamily) {
+                result.fontFamily = familyName
+            }
+            result.bold = traits.bold && !isBoldWeight(defaultStyle.fontWeight)
+            result.italic = traits.italic
+            result.code = traits.monospace && !familyName.localizedCaseInsensitiveContains(defaultStyle.fontFamily)
         }
 
         let underlineStyle = (attributes[.underlineStyle] as? NSNumber)?.intValue ?? (attributes[.underlineStyle] as? Int) ?? 0
@@ -425,8 +484,10 @@ final class RichTextContentBridge {
             result.link = URL(string: link)
         }
 
-        if let color = attributes[.foregroundColor] as? PlatformColor {
-            result.color = colorValue(from: color)
+        if let color = attributes[.foregroundColor] as? PlatformColor,
+           let resolvedColor = colorValue(from: color),
+           resolvedColor != defaultStyle.textColor {
+            result.color = resolvedColor
         }
         if let color = attributes[.backgroundColor] as? PlatformColor {
             result.highlightColor = colorValue(from: color)
@@ -441,27 +502,80 @@ final class RichTextContentBridge {
         return result
     }
 
-    private static func font(for textAttributes: TextAttributes) -> PlatformFont {
-        let size = textAttributes.fontSize ?? 14
+    private static func font(
+        for textAttributes: TextAttributes,
+        defaultStyle: ParagraphStyle
+    ) -> PlatformFont {
+        let size = textAttributes.fontSize ?? defaultStyle.fontSize
+        let family = textAttributes.fontFamily ?? defaultStyle.fontFamily
+        let wantsBold = textAttributes.bold || isBoldWeight(defaultStyle.fontWeight)
+        let wantsItalic = textAttributes.italic
+        let wantsCodeFace = textAttributes.code || defaultStyle.fontFamily.localizedCaseInsensitiveContains("mono")
 
         #if canImport(AppKit)
-        let base = textAttributes.fontFamily.flatMap { NSFont(name: $0, size: size) } ?? NSFont.systemFont(ofSize: size)
-        if textAttributes.bold {
-            return NSFont.boldSystemFont(ofSize: size)
+        let base = NSFont(name: family, size: size)
+            ?? (wantsCodeFace
+                ? NSFont.monospacedSystemFont(ofSize: size, weight: appKitWeight(for: defaultStyle.fontWeight))
+                : NSFont.systemFont(ofSize: size, weight: appKitWeight(for: defaultStyle.fontWeight)))
+        var resolved = base
+        if wantsCodeFace, !fontTraits(for: resolved).monospace {
+            resolved = NSFont.monospacedSystemFont(ofSize: size, weight: appKitWeight(for: defaultStyle.fontWeight))
         }
-        if textAttributes.italic {
-            return NSFontManager.shared.convert(base, toHaveTrait: .italicFontMask)
+        if wantsBold {
+            resolved = NSFontManager.shared.convert(resolved, toHaveTrait: .boldFontMask)
         }
-        return base
+        if wantsItalic {
+            resolved = NSFontManager.shared.convert(resolved, toHaveTrait: .italicFontMask)
+        }
+        return resolved
         #else
-        if textAttributes.bold {
-            return UIFont.boldSystemFont(ofSize: size)
+        let descriptor: UIFontDescriptor
+        if wantsCodeFace {
+            descriptor = UIFont.monospacedSystemFont(ofSize: size, weight: uiKitWeight(for: defaultStyle.fontWeight)).fontDescriptor
+        } else if let custom = UIFont(name: family, size: size) {
+            descriptor = custom.fontDescriptor
+        } else {
+            descriptor = UIFont.systemFont(ofSize: size, weight: uiKitWeight(for: defaultStyle.fontWeight)).fontDescriptor
         }
-        if textAttributes.italic {
-            return UIFont.italicSystemFont(ofSize: size)
-        }
-        return textAttributes.fontFamily.flatMap { UIFont(name: $0, size: size) } ?? UIFont.systemFont(ofSize: size)
+        var traits = descriptor.symbolicTraits
+        if wantsBold { traits.insert(.traitBold) }
+        if wantsItalic { traits.insert(.traitItalic) }
+        if wantsCodeFace { traits.insert(.traitMonoSpace) }
+        let resolvedDescriptor = descriptor.withSymbolicTraits(traits) ?? descriptor
+        return UIFont(descriptor: resolvedDescriptor, size: size)
         #endif
+    }
+
+    private static func nsParagraphStyle(from style: ParagraphStyle) -> NSMutableParagraphStyle {
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = textAlignment(for: style.alignment)
+        paragraphStyle.firstLineHeadIndent = style.firstLineIndent
+        paragraphStyle.headIndent = style.indent
+        paragraphStyle.paragraphSpacing = style.paragraphSpacing
+        paragraphStyle.lineSpacing = max((style.lineSpacing - 1) * style.fontSize, 0)
+        return paragraphStyle
+    }
+
+    private static func textAlignment(for alignment: TextAlignment) -> NSTextAlignment {
+        switch alignment {
+        case .leading:
+            .left
+        case .center:
+            .center
+        case .trailing:
+            .right
+        case .justified:
+            .justified
+        }
+    }
+
+    private static func isBoldWeight(_ weight: FontWeight) -> Bool {
+        switch weight {
+        case .ultraLight, .thin, .light, .regular:
+            false
+        case .medium, .semibold, .bold, .heavy, .black:
+            true
+        }
     }
 
     private static func platformColor(from value: ColorValue) -> PlatformColor {
@@ -507,6 +621,72 @@ final class RichTextContentBridge {
             colorSpace: .sRGB
         )
     }
+
+    private static func fontTraits(for font: PlatformFont) -> (bold: Bool, italic: Bool, monospace: Bool) {
+        #if canImport(AppKit)
+        let traits = NSFontManager.shared.traits(of: font)
+        return (
+            traits.contains(.boldFontMask),
+            traits.contains(.italicFontMask),
+            traits.contains(.fixedPitchFontMask) || font.fontName.localizedCaseInsensitiveContains("mono")
+        )
+        #else
+        let traits = font.fontDescriptor.symbolicTraits
+        return (
+            traits.contains(.traitBold),
+            traits.contains(.traitItalic),
+            traits.contains(.traitMonoSpace) || font.fontName.localizedCaseInsensitiveContains("mono")
+        )
+        #endif
+    }
+
+    #if canImport(AppKit)
+    private static func appKitWeight(for weight: FontWeight) -> NSFont.Weight {
+        switch weight {
+        case .ultraLight:
+            .ultraLight
+        case .thin:
+            .thin
+        case .light:
+            .light
+        case .regular:
+            .regular
+        case .medium:
+            .medium
+        case .semibold:
+            .semibold
+        case .bold:
+            .bold
+        case .heavy:
+            .heavy
+        case .black:
+            .black
+        }
+    }
+    #else
+    private static func uiKitWeight(for weight: FontWeight) -> UIFont.Weight {
+        switch weight {
+        case .ultraLight:
+            .ultraLight
+        case .thin:
+            .thin
+        case .light:
+            .light
+        case .regular:
+            .regular
+        case .medium:
+            .medium
+        case .semibold:
+            .semibold
+        case .bold:
+            .bold
+        case .heavy:
+            .heavy
+        case .black:
+            .black
+        }
+    }
+    #endif
 }
 
 private struct AttributedLine {
