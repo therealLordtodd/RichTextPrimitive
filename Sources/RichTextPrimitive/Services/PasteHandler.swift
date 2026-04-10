@@ -10,43 +10,46 @@ public struct PasteHandler: Sendable {
     }
 
     public func blocks(fromHTML html: String) -> [Block] {
-        let normalized = html
-            .replacingOccurrences(of: "<br>", with: "\n")
-            .replacingOccurrences(of: "<br/>", with: "\n")
-            .replacingOccurrences(of: "<br />", with: "\n")
-
-        let headingPattern = try? NSRegularExpression(pattern: "<h([1-6])>(.*?)</h\\1>", options: [.caseInsensitive, .dotMatchesLineSeparators])
-        if let headingPattern {
-            let nsRange = NSRange(normalized.startIndex..., in: normalized)
-            let matches = headingPattern.matches(in: normalized, range: nsRange)
-            if !matches.isEmpty {
-                return matches.compactMap { match in
-                    guard
-                        let levelRange = Range(match.range(at: 1), in: normalized),
-                        let contentRange = Range(match.range(at: 2), in: normalized),
-                        let level = Int(normalized[levelRange])
-                    else {
-                        return nil
-                    }
-                    return Block(type: .heading, content: .heading(.plain(stripTags(String(normalized[contentRange]))), level: level))
-                }
-            }
+        let normalized = normalizeHTML(html)
+        guard let blockPattern = try? NSRegularExpression(
+            pattern: #"<(h[1-6]|p|div|blockquote|pre|li)\b[^>]*>(.*?)</\1\s*>|<hr\b[^>]*\/?>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        ) else {
+            return blocks(from: htmlText(normalized))
         }
 
-        let listPattern = try? NSRegularExpression(pattern: "<li>(.*?)</li>", options: [.caseInsensitive, .dotMatchesLineSeparators])
-        if let listPattern {
-            let nsRange = NSRange(normalized.startIndex..., in: normalized)
-            let matches = listPattern.matches(in: normalized, range: nsRange)
-            if !matches.isEmpty {
-                return matches.compactMap { match in
-                    guard let range = Range(match.range(at: 1), in: normalized) else { return nil }
-                    return Block(type: .list, content: .list(.plain(stripTags(String(normalized[range]))), style: .bullet, indentLevel: 0))
-                }
-            }
+        let fullRange = NSRange(normalized.startIndex..., in: normalized)
+        let matches = blockPattern.matches(in: normalized, range: fullRange)
+        guard !matches.isEmpty else {
+            return blocks(from: htmlText(normalized))
         }
 
-        let paragraphText = stripTags(normalized)
-        return blocks(from: paragraphText)
+        var parsedBlocks: [Block] = []
+        var cursor = normalized.startIndex
+
+        for match in matches {
+            guard let matchRange = Range(match.range, in: normalized) else { continue }
+            appendParagraphBlocks(fromHTMLFragment: String(normalized[cursor..<matchRange.lowerBound]), to: &parsedBlocks)
+
+            if match.range(at: 1).location == NSNotFound {
+                parsedBlocks.append(Block(type: .divider, content: .divider))
+            } else if let tagRange = Range(match.range(at: 1), in: normalized),
+                      let contentRange = Range(match.range(at: 2), in: normalized),
+                      let block = block(
+                        tag: String(normalized[tagRange]).lowercased(),
+                        htmlContent: String(normalized[contentRange]),
+                        fullHTML: normalized,
+                        matchLocation: match.range.location
+                      ) {
+                parsedBlocks.append(block)
+            }
+
+            cursor = matchRange.upperBound
+        }
+
+        appendParagraphBlocks(fromHTMLFragment: String(normalized[cursor...]), to: &parsedBlocks)
+
+        return parsedBlocks.isEmpty ? blocks(from: htmlText(normalized)) : parsedBlocks
     }
 
     public func blocks(fromRTF data: Data) -> [Block] {
@@ -104,7 +107,140 @@ public struct PasteHandler: Sendable {
         return nil
     }
 
-    private func stripTags(_ text: String) -> String {
-        text.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+    private func block(
+        tag: String,
+        htmlContent: String,
+        fullHTML: String,
+        matchLocation: Int
+    ) -> Block? {
+        switch tag {
+        case "h1", "h2", "h3", "h4", "h5", "h6":
+            let level = Int(tag.dropFirst()) ?? 1
+            return Block(type: .heading, content: .heading(.plain(htmlText(htmlContent)), level: level))
+        case "p", "div":
+            let text = htmlText(htmlContent)
+            guard !text.isEmpty else { return nil }
+            return Block(type: .paragraph, content: .text(.plain(text)))
+        case "blockquote":
+            return Block(type: .blockQuote, content: .blockQuote(.plain(htmlText(htmlContent))))
+        case "pre":
+            return Block(type: .codeBlock, content: .codeBlock(code: htmlText(htmlContent, preservesLineBreaks: true), language: nil))
+        case "li":
+            let text = htmlText(htmlContent)
+            guard !text.isEmpty else { return nil }
+            return Block(
+                type: .list,
+                content: .list(
+                    .plain(text),
+                    style: isOrderedListItem(in: fullHTML, beforeUTF16Location: matchLocation) ? .numbered : .bullet,
+                    indentLevel: 0
+                )
+            )
+        default:
+            return nil
+        }
+    }
+
+    private func appendParagraphBlocks(
+        fromHTMLFragment fragment: String,
+        to blocks: inout [Block]
+    ) {
+        for line in htmlText(fragment).components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            blocks.append(Block(type: .paragraph, content: .text(.plain(trimmed))))
+        }
+    }
+
+    private func normalizeHTML(_ html: String) -> String {
+        html
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+    }
+
+    private func htmlText(
+        _ fragment: String,
+        preservesLineBreaks: Bool = false
+    ) -> String {
+        var text = fragment
+            .replacingOccurrences(
+                of: #"(?is)<(script|style)\b[^>]*>.*?</\1>"#,
+                with: "",
+                options: .regularExpression
+            )
+            .replacingOccurrences(of: #"(?i)<br\s*/?>"#, with: "\n", options: .regularExpression)
+            .replacingOccurrences(
+                of: #"(?i)</(p|div|li|h[1-6]|blockquote|pre)>"#,
+                with: "\n",
+                options: .regularExpression
+            )
+            .replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+
+        text = decodeHTMLEntities(in: text)
+
+        guard !preservesLineBreaks else {
+            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return text
+            .components(separatedBy: "\n")
+            .map { line in
+                line
+                    .replacingOccurrences(of: #"[ \t\f\v]+"#, with: " ", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+
+    private func decodeHTMLEntities(in text: String) -> String {
+        var decoded = text
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&apos;", with: "'")
+
+        decoded = decodeNumericHTMLEntities(in: decoded, pattern: #"&#(\d+);"#, radix: 10)
+        decoded = decodeNumericHTMLEntities(in: decoded, pattern: #"&#x([0-9a-fA-F]+);"#, radix: 16)
+        return decoded
+    }
+
+    private func decodeNumericHTMLEntities(
+        in text: String,
+        pattern: String,
+        radix: Int
+    ) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+
+        var decoded = text
+        let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed()
+        for match in matches {
+            guard let matchRange = Range(match.range, in: decoded),
+                  let valueRange = Range(match.range(at: 1), in: decoded),
+                  let scalarValue = UInt32(decoded[valueRange], radix: radix),
+                  let scalar = UnicodeScalar(scalarValue) else { continue }
+
+            decoded.replaceSubrange(matchRange, with: String(Character(scalar)))
+        }
+        return decoded
+    }
+
+    private func isOrderedListItem(
+        in html: String,
+        beforeUTF16Location location: Int
+    ) -> Bool {
+        let boundedLocation = min(max(location, 0), html.utf16.count)
+        let index = String.Index(utf16Offset: boundedLocation, in: html)
+
+        let prefix = String(html[..<index]).lowercased()
+        let lastOrderedList = prefix.range(of: "<ol", options: String.CompareOptions.backwards)?.lowerBound
+        let lastUnorderedList = prefix.range(of: "<ul", options: String.CompareOptions.backwards)?.lowerBound
+
+        guard let lastOrderedList else { return false }
+        guard let lastUnorderedList else { return true }
+        return lastOrderedList > lastUnorderedList
     }
 }
