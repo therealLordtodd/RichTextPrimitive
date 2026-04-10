@@ -54,6 +54,9 @@ final class PlatformRichTextView: NSScrollView, NSTextViewDelegate {
         }
 
         bridge?.updateStyleSheet(styleSheet)
+        if let textLayoutManager = editorTextView.textLayoutManager {
+            bridge?.attachTextLayoutManager(textLayoutManager)
+        }
 
         syncFromBridge()
     }
@@ -78,10 +81,14 @@ final class PlatformRichTextView: NSScrollView, NSTextViewDelegate {
         bridge.applyBlocks(bridge.dataSource.blocks)
         let rendered = state.map { bridge.attributedString(spellIssues: $0.spellIssues) }
             ?? bridge.cachedAttributedString
-        if let textContentStorage = editorTextView.textContentStorage {
-            textContentStorage.attributedString = rendered
-        } else {
-            editorTextView.textStorage?.setAttributedString(rendered)
+        bridge.applyRenderedAttributedString(rendered)
+
+        if editorTextView.textLayoutManager?.textContentManager !== bridge.textContentStorage {
+            if let textContentStorage = editorTextView.textContentStorage {
+                textContentStorage.attributedString = rendered
+            } else {
+                editorTextView.textStorage?.setAttributedString(rendered)
+            }
         }
 
         if let state {

@@ -49,6 +49,13 @@ final class RichTextContentBridge: NSObject, @preconcurrency NSTextContentStorag
         self.styleSheet = styleSheet
     }
 
+    func attachTextLayoutManager(_ layoutManager: NSTextLayoutManager) {
+        if layoutManager.textContentManager !== textContentStorage {
+            layoutManager.replace(textContentStorage)
+        }
+        layoutManager.delegate = self
+    }
+
     func applyBlocks(_ blocks: [Block]) {
         var ranges: [BlockID: Range<Int>] = [:]
         let attributed = NSMutableAttributedString()
@@ -70,6 +77,10 @@ final class RichTextContentBridge: NSObject, @preconcurrency NSTextContentStorag
         cachedAttributedString = attributed
         blockRanges = ranges
         textContentStorage.attributedString = attributed
+    }
+
+    func applyRenderedAttributedString(_ attributedString: NSAttributedString) {
+        textContentStorage.attributedString = attributedString
     }
 
     func processEditing(in range: NSTextRange, delta: Int) {

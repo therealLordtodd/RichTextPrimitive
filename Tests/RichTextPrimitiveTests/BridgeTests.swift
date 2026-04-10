@@ -96,6 +96,45 @@ struct BridgeTests {
         #expect(bridge.textContentStorage.textLayoutManagers.contains(bridge.textLayoutManager))
     }
 
+    @Test func bridgeCanAttachExternalTextLayoutManager() {
+        let dataSource = ArrayRichTextDataSource(
+            blocks: [
+                Block(id: "a", type: .paragraph, content: .text(.plain("Editable"))),
+            ]
+        )
+        let bridge = RichTextContentBridge(dataSource: dataSource, styleSheet: .standard)
+        let externalLayoutManager = NSTextLayoutManager()
+
+        bridge.attachTextLayoutManager(externalLayoutManager)
+
+        #expect(externalLayoutManager.textContentManager === bridge.textContentStorage)
+        #expect(bridge.textContentStorage.textLayoutManagers.contains(externalLayoutManager))
+        #expect(externalLayoutManager.delegate === bridge)
+    }
+
+    @Test func renderedAttributedStringUpdatesBridgeTextContentStorage() {
+        let dataSource = ArrayRichTextDataSource(
+            blocks: [
+                Block(id: "a", type: .paragraph, content: .text(.plain("teh word"))),
+            ]
+        )
+        let bridge = RichTextContentBridge(dataSource: dataSource, styleSheet: .standard)
+        let issue = RichTextSpellIssue(
+            blockID: "a",
+            range: 0..<3,
+            type: .spelling,
+            message: "Possible misspelling: teh",
+            suggestions: ["the"],
+            word: "teh"
+        )
+
+        bridge.applyRenderedAttributedString(bridge.attributedString(spellIssues: [issue]))
+
+        let rendered = try! #require(bridge.textContentStorage.attributedString)
+        #expect(rendered.string == "teh word")
+        #expect(rendered.attribute(.richTextSpellIssueID, at: 0, effectiveRange: nil) != nil)
+    }
+
     @Test func processEditingSynchronizesFromTextContentStorage() {
         let dataSource = ArrayRichTextDataSource(
             blocks: [
