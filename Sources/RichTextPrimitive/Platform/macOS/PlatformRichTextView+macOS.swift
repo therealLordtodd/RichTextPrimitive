@@ -3,7 +3,7 @@ import AppKit
 import SwiftUI
 
 final class PlatformRichTextView: NSScrollView, NSTextViewDelegate {
-    private let editorTextView = NSTextView()
+    private let editorTextView = NSTextView(usingTextLayoutManager: true)
     private var bridge: RichTextContentBridge?
     private weak var state: RichTextState?
     private weak var observedDataSource: (any RichTextDataSource)?
@@ -78,7 +78,11 @@ final class PlatformRichTextView: NSScrollView, NSTextViewDelegate {
         bridge.applyBlocks(bridge.dataSource.blocks)
         let rendered = state.map { bridge.attributedString(spellIssues: $0.spellIssues) }
             ?? bridge.cachedAttributedString
-        editorTextView.textStorage?.setAttributedString(rendered)
+        if let textContentStorage = editorTextView.textContentStorage {
+            textContentStorage.attributedString = rendered
+        } else {
+            editorTextView.textStorage?.setAttributedString(rendered)
+        }
 
         if let state {
             applySelection(from: state)
