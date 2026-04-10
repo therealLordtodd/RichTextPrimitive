@@ -35,6 +35,7 @@ struct EditorHost: View {
 - `ArrayRichTextDataSource`: In-memory observable data source.
 - `RichTextState`: Selection, active attributes, find state, writing mode, zoom, and spell-check state.
 - `RichTextEditor`: SwiftUI editor view backed by platform TextKit integration.
+- `RichTextBlockNavigator`: Optional block outline and drag-to-reorder rail used by higher-level hosts such as `DocumentPrimitive`.
 - `TextStyleSheet` and `ParagraphStyle`: Default, heading, quote, code, list, and custom paragraph styling.
 - `TextFormatting`, `BlockSplitMerge`, `ListContinuation`, `PasteHandler`, and `SpellCheckingService`: Editing services.
 - `DocumentAITool`, `DocumentAIContext`, and `BlockMutation`: Optional AI tool surface from `RichTextPrimitiveAI`.
@@ -43,6 +44,7 @@ struct EditorHost: View {
 - Mutate content through `RichTextDataSource` methods such as `insertBlocks(_:at:)`, `replaceBlock(at:with:)`, and `updateTextContent(blockID:content:)`.
 - Use `RichTextState.connectUndo(stack:dataSource:)` to record data-source edits and apply `UndoStack<[Block]>` undo/redo snapshots back to the editor. Call `disconnectUndo()` before tearing down a custom binding.
 - Pass a custom `SpellChecker` to `RichTextEditor` for deterministic tests or specialized dictionaries.
+- Set `showsBlockNavigator: true` when the host wants a drag-reorder block rail backed by `DragAndDropPrimitive` and the same `RichTextDataSource`.
 - Use `PasteHandler` with `ClipboardPrimitive.ClipboardContent` when hosts need deterministic block conversion for HTML, RTF, URLs, files, or pasted images. On macOS, `RichTextEditor` also adds native `Paste Special` actions backed by that same conversion path.
 - Use `TextContent.plain(_:)` for plain text and `TextContent.sliced(_:)` when rendering fragments.
 - Use `TextStyleSheet.standard` as the default editor stylesheet and override with a custom sheet when embedding.

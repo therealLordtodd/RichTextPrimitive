@@ -1,0 +1,319 @@
+import DragAndDropPrimitive
+import SwiftUI
+
+@MainActor
+final class RichTextBlockNavigatorController: ObservableObject {
+    @Published var items: [RichTextBlockNavigatorItem] = []
+
+    private weak var dataSource: (any RichTextDataSource)?
+    private var mutationObserverID: UUID?
+    private var boundIdentity: ObjectIdentifier?
+
+    func bind(to dataSource: any RichTextDataSource) {
+        let identity = ObjectIdentifier(dataSource)
+        guard boundIdentity != identity else {
+            sync(from: dataSource.blocks)
+            return
+        }
+
+        unbind()
+        self.dataSource = dataSource
+        boundIdentity = identity
+        sync(from: dataSource.blocks)
+
+        mutationObserverID = dataSource.addMutationObserver { [weak self, weak dataSource] _ in
+            guard let self, let dataSource else { return }
+            self.sync(from: dataSource.blocks)
+        }
+    }
+
+    func unbind() {
+        if let dataSource, let mutationObserverID {
+            dataSource.removeMutationObserver(mutationObserverID)
+        }
+
+        dataSource = nil
+        mutationObserverID = nil
+        boundIdentity = nil
+        items = []
+    }
+
+    func applyReorder(_ result: ReorderResult<RichTextBlockNavigatorItem>) {
+        guard let dataSource else { return }
+        dataSource.moveBlocks(
+            from: IndexSet(integer: result.fromIndex),
+            to: result.toIndex
+        )
+        sync(from: dataSource.blocks)
+    }
+
+    private func sync(from blocks: [Block]) {
+        items = blocks.enumerated().map { index, block in
+            RichTextBlockNavigatorItem(index: index, block: block)
+        }
+    }
+}
+
+struct RichTextBlockNavigatorItem: Identifiable, Equatable, Sendable {
+    let id: BlockID
+    let index: Int
+    let iconName: String
+    let kindLabel: String
+    let title: String
+    let subtitle: String?
+
+    init(index: Int, block: Block) {
+        self.id = block.id
+        self.index = index
+        self.iconName = Self.iconName(for: block.type)
+        self.kindLabel = Self.kindLabel(for: block.type, content: block.content)
+        self.title = Self.title(for: block.content)
+        self.subtitle = Self.subtitle(for: block.content)
+    }
+
+    private static func iconName(for type: BlockType) -> String {
+        switch type {
+        case .paragraph:
+            "paragraph"
+        case .heading:
+            "textformat.size"
+        case .blockQuote:
+            "quote.opening"
+        case .codeBlock:
+            "curlybraces"
+        case .list:
+            "list.bullet"
+        case .table:
+            "tablecells"
+        case .image:
+            "photo"
+        case .divider:
+            "minus"
+        case .embed:
+            "link"
+        }
+    }
+
+    private static func kindLabel(for type: BlockType, content: BlockContent) -> String {
+        switch content {
+        case let .heading(_, level):
+            "Heading \(level)"
+        case let .list(_, style, _):
+            "\(style.rawValue.capitalized) List"
+        case let .embed(embed):
+            embed.kind.uppercased()
+        default:
+            switch type {
+            case .paragraph:
+                "Paragraph"
+            case .heading:
+                "Heading"
+            case .blockQuote:
+                "Quote"
+            case .codeBlock:
+                "Code"
+            case .list:
+                "List"
+            case .table:
+                "Table"
+            case .image:
+                "Image"
+            case .divider:
+                "Divider"
+            case .embed:
+                "Embed"
+            }
+        }
+    }
+
+    private static func title(for content: BlockContent) -> String {
+        let fallback = "Untitled Block"
+        switch content {
+        case let .text(text),
+             let .heading(text, _),
+             let .blockQuote(text),
+             let .list(text, _, _):
+            return firstMeaningfulLine(in: text.plainText) ?? fallback
+        case let .codeBlock(code, language):
+            let prefix = language?.uppercased() ?? "Code"
+            return firstMeaningfulLine(in: code).map { "\(prefix): \($0)" } ?? prefix
+        case let .table(table):
+            if let caption = table.caption?.plainText,
+               let firstLine = firstMeaningfulLine(in: caption) {
+                return firstLine
+            }
+            let columnCount = table.rows.map(\.count).max() ?? 0
+            return "Table \(table.rows.count)x\(columnCount)"
+        case let .image(image):
+            if let altText = firstMeaningfulLine(in: image.altText) {
+                return altText
+            }
+            if let url = image.url?.lastPathComponent,
+               !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return url
+            }
+            return "Image"
+        case .divider:
+            return "Section Divider"
+        case let .embed(embed):
+            if let title = metadataString(["title", "name", "filename"], metadata: embed.metadata) {
+                return title
+            }
+            if let payload = firstMeaningfulLine(in: embed.payload) {
+                return payload
+            }
+            return embed.kind.uppercased()
+        }
+    }
+
+    private static func subtitle(for content: BlockContent) -> String? {
+        switch content {
+        case let .heading(text, _),
+             let .text(text),
+             let .blockQuote(text),
+             let .list(text, _, _):
+            return detailSummary(for: text.plainText)
+        case let .codeBlock(code, _):
+            return detailSummary(for: code)
+        case let .table(table):
+            if let caption = table.caption?.plainText,
+               let summary = detailSummary(for: caption) {
+                return summary
+            }
+            let rowCount = table.rows.count
+            let columnCount = table.rows.map(\.count).max() ?? 0
+            return "\(rowCount) rows, \(columnCount) columns"
+        case let .image(image):
+            if let size = image.size {
+                return "\(Int(size.width)) x \(Int(size.height))"
+            }
+            return image.url?.pathExtension.uppercased()
+        case .divider:
+            return nil
+        case let .embed(embed):
+            return metadataString(["url", "path"], metadata: embed.metadata)
+                ?? detailSummary(for: embed.payload)
+        }
+    }
+
+    private static func firstMeaningfulLine(in text: String?) -> String? {
+        guard let text else { return nil }
+        return text
+            .split(whereSeparator: \.isNewline)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty })
+    }
+
+    private static func detailSummary(for text: String?) -> String? {
+        guard let firstLine = firstMeaningfulLine(in: text) else { return nil }
+        let condensed = firstLine.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        guard condensed.count > 48 else { return condensed }
+        let cutoff = condensed.index(condensed.startIndex, offsetBy: 45)
+        return "\(condensed[..<cutoff])..."
+    }
+
+    private static func metadataString(
+        _ keys: [String],
+        metadata: [String: MetadataValue]
+    ) -> String? {
+        for key in keys {
+            if case let .string(value)? = metadata[key] {
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    return trimmed
+                }
+            }
+        }
+        return nil
+    }
+}
+
+struct RichTextBlockNavigator: View {
+    @ObservedObject var controller: RichTextBlockNavigatorController
+    let focusedBlockID: BlockID?
+    let onSelect: (BlockID) -> Void
+
+    var body: some View {
+        if controller.items.count > 1 {
+            ReorderableList(
+                items: Binding(
+                    get: { controller.items },
+                    set: { controller.items = $0 }
+                ),
+                showsDragHandles: true,
+                style: navigatorStyle,
+                onReorder: controller.applyReorder
+            ) { item in
+                blockRow(item)
+            }
+            .frame(width: 220, alignment: .topLeading)
+            .padding(12)
+            .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .accessibilityLabel("Block navigator")
+        }
+    }
+
+    private func blockRow(_ item: RichTextBlockNavigatorItem) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: item.iconName)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(focusedBlockID == item.id ? Color.accentColor : Color.secondary)
+                .frame(width: 18, alignment: .center)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(item.title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Text("\(item.index + 1)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(item.kindLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if let subtitle = item.subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+        .padding(.horizontal, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(selectionBackground(for: item.id))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onSelect(item.id)
+        }
+        .accessibilityLabel(item.title)
+        .accessibilityHint("Select this block in the editor")
+    }
+
+    @ViewBuilder
+    private func selectionBackground(for blockID: BlockID) -> some View {
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(
+                focusedBlockID == blockID
+                    ? Color.accentColor.opacity(0.14)
+                    : Color.clear
+            )
+    }
+
+    private var navigatorStyle: ReorderableContainerStyle {
+        ReorderableContainerStyle(
+            dragHandleColor: .secondary,
+            targetedBackgroundColor: Color.accentColor.opacity(0.12),
+            idleBackgroundColor: .clear,
+            previewBackgroundColor: .white,
+            previewBackgroundOpacity: 0.98,
+            previewBorderColor: Color.accentColor,
+            previewBorderOpacity: 0.25
+        )
+    }
+}
