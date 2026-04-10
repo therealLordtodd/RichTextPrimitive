@@ -611,7 +611,7 @@ final class RichTextContentBridge: NSObject, @preconcurrency NSTextContentStorag
 
         if let font = attributes[.font] as? PlatformFont {
             let traits = fontTraits(for: font)
-            let familyName = font.familyName ?? ""
+            let familyName = normalizedFontFamilyName(font.familyName)
             if abs(font.pointSize - defaultStyle.fontSize) > 0.1 {
                 result.fontSize = font.pointSize
             }
@@ -650,6 +650,10 @@ final class RichTextContentBridge: NSObject, @preconcurrency NSTextContentStorag
         result.subscript = baselineOffset < 0
 
         return result
+    }
+
+    private static func normalizedFontFamilyName(_ familyName: String?) -> String {
+        familyName ?? ""
     }
 
     private static func font(

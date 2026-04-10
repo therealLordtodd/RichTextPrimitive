@@ -46,6 +46,9 @@ final class PlatformRichTextView: UITextView, UITextViewDelegate {
         }
 
         bridge?.updateStyleSheet(styleSheet)
+        if let textLayoutManager {
+            bridge?.attachTextLayoutManager(textLayoutManager)
+        }
 
         syncFromBridge()
     }
@@ -65,8 +68,14 @@ final class PlatformRichTextView: UITextView, UITextViewDelegate {
         guard let bridge else { return }
         isApplyingUpdate = true
         bridge.applyBlocks(bridge.dataSource.blocks)
-        attributedText = editorState.map { bridge.attributedString(spellIssues: $0.spellIssues) }
+        let rendered = editorState.map { bridge.attributedString(spellIssues: $0.spellIssues) }
             ?? bridge.cachedAttributedString
+        bridge.applyRenderedAttributedString(rendered)
+
+        if textLayoutManager?.textContentManager !== bridge.textContentStorage {
+            attributedText = rendered
+        }
+
         if let editorState {
             applySelection(from: editorState)
         }
