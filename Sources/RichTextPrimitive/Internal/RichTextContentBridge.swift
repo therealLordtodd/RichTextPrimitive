@@ -12,13 +12,15 @@ import ColorPickerPrimitive
 import TypographyPrimitive
 
 @MainActor
-final class RichTextContentBridge {
+final class RichTextContentBridge: NSObject, @preconcurrency NSTextContentStorageDelegate, @preconcurrency NSTextLayoutManagerDelegate {
     private static let internalLineSeparator = "\u{2028}"
     private static let metadataEncoder = JSONEncoder()
     private static let metadataDecoder = JSONDecoder()
 
     let dataSource: any RichTextDataSource
     let textContentStorage: NSTextContentStorage
+    let textLayoutManager: NSTextLayoutManager
+    let textContainer: NSTextContainer
     private(set) var styleSheet: TextStyleSheet
 
     private(set) var blockRanges: [BlockID: Range<Int>] = [:]
@@ -28,6 +30,18 @@ final class RichTextContentBridge {
         self.dataSource = dataSource
         self.styleSheet = styleSheet
         self.textContentStorage = NSTextContentStorage()
+        self.textLayoutManager = NSTextLayoutManager()
+        self.textContainer = NSTextContainer(
+            size: CGSize(
+                width: CGFloat.greatestFiniteMagnitude,
+                height: CGFloat.greatestFiniteMagnitude
+            )
+        )
+        super.init()
+        textContentStorage.delegate = self
+        textContentStorage.addTextLayoutManager(textLayoutManager)
+        textLayoutManager.delegate = self
+        textLayoutManager.textContainer = textContainer
         applyBlocks(dataSource.blocks)
     }
 
@@ -55,6 +69,7 @@ final class RichTextContentBridge {
 
         cachedAttributedString = attributed
         blockRanges = ranges
+        textContentStorage.attributedString = attributed
     }
 
     func processEditing(in range: NSTextRange, delta: Int) {
@@ -202,6 +217,35 @@ final class RichTextContentBridge {
         if !blocks.isEmpty {
             dataSource.insertBlocks(blocks, at: 0)
         }
+    }
+
+    func textContentStorage(
+        _ textContentStorage: NSTextContentStorage,
+        textParagraphWith range: NSRange
+    ) -> NSTextParagraph? {
+        guard let attributedString = textContentStorage.attributedString,
+              attributedString.length > 0,
+              range.location < attributedString.length else { return nil }
+
+        let safeLength = min(range.length, attributedString.length - range.location)
+        let safeRange = NSRange(location: range.location, length: safeLength)
+        let attributes = attributedString.attributes(at: safeRange.location, effectiveRange: nil)
+        guard let descriptor = Self.blockDescriptor(from: attributes) else { return nil }
+
+        return BlockTextElement(
+            blockID: descriptor.blockID ?? BlockID(UUID().uuidString),
+            blockType: descriptor.blockType,
+            metadata: descriptor.metadata,
+            attributedString: attributedString.attributedSubstring(from: safeRange)
+        )
+    }
+
+    func textLayoutManager(
+        _ textLayoutManager: NSTextLayoutManager,
+        textLayoutFragmentFor location: any NSTextLocation,
+        in textElement: NSTextElement
+    ) -> NSTextLayoutFragment {
+        BlockLayoutFragment(textElement: textElement, range: textElement.elementRange)
     }
 
     private static func blocks(

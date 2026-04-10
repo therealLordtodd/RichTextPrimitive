@@ -76,6 +76,26 @@ struct BridgeTests {
         #expect(resolved.offset == 5)
     }
 
+    @Test func textContentStorageVendsBlockAwareTextKitElements() {
+        let dataSource = ArrayRichTextDataSource(
+            blocks: [
+                Block(id: "quote", type: .blockQuote, content: .blockQuote(.plain("Quoted"))),
+            ]
+        )
+
+        let bridge = RichTextContentBridge(dataSource: dataSource, styleSheet: .standard)
+        let paragraph = bridge.textContentStorage(
+            bridge.textContentStorage,
+            textParagraphWith: NSRange(location: 0, length: bridge.cachedAttributedString.length)
+        )
+
+        let blockParagraph = try! #require(paragraph as? BlockTextElement)
+        #expect(blockParagraph.blockID == "quote")
+        #expect(blockParagraph.blockType == .blockQuote)
+        #expect(blockParagraph.attributedString.string == "Quoted")
+        #expect(bridge.textContentStorage.textLayoutManagers.contains(bridge.textLayoutManager))
+    }
+
     @Test func editedTextRoundTripsBackIntoBlocks() {
         let dataSource = ArrayRichTextDataSource(
             blocks: [
