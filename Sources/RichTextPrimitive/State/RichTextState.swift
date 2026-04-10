@@ -18,6 +18,10 @@ public final class RichTextState {
     public var spellIssues: [RichTextSpellIssue]
 
     private var undoObserverID: UUID?
+    private weak var undoDataSource: (any RichTextDataSource)?
+    private weak var undoStack: UndoStack<[Block]>?
+    private var undoStackObservationToken: UndoObservationToken?
+    private var isApplyingUndoSnapshot = false
     private let spellCheckingService = SpellCheckingService()
 
     public init(
@@ -45,29 +49,36 @@ public final class RichTextState {
         stack: UndoStack<[Block]>,
         dataSource: any RichTextDataSource
     ) {
-        if let undoObserverID {
-            dataSource.removeMutationObserver(undoObserverID)
+        disconnectUndo()
+
+        undoDataSource = dataSource
+        undoStack = stack
+
+        undoObserverID = dataSource.addMutationObserver { [weak self, weak stack, weak dataSource] mutation in
+            guard let self, let stack, let dataSource, !self.isApplyingUndoSnapshot else { return }
+            stack.push(dataSource.blocks, description: Self.undoDescription(for: mutation))
         }
 
-        undoObserverID = dataSource.addMutationObserver { mutation in
-            let description = switch mutation {
-            case .blocksInserted:
-                "Insert Blocks"
-            case .blocksDeleted:
-                "Delete Blocks"
-            case .blocksMoved:
-                "Move Blocks"
-            case .blockReplaced:
-                "Replace Block"
-            case .textUpdated:
-                "Edit Text"
-            case .typeChanged:
-                "Change Block Type"
-            case .batchUpdate:
-                "Batch Update"
-            }
-            stack.push(dataSource.blocks, description: description)
+        undoStackObservationToken = stack.observe { [weak self, weak dataSource, weak stack] in
+            guard let self, let dataSource, let stack else { return }
+            self.applyUndoSnapshot(stack.currentState, to: dataSource)
         }
+    }
+
+    public func disconnectUndo() {
+        if let undoObserverID {
+            undoDataSource?.removeMutationObserver(undoObserverID)
+            self.undoObserverID = nil
+        }
+
+        if let undoStackObservationToken {
+            undoStack?.removeObservation(undoStackObservationToken)
+            self.undoStackObservationToken = nil
+        }
+
+        undoDataSource = nil
+        undoStack = nil
+        isApplyingUndoSnapshot = false
     }
 
     public func refreshSpellChecking(
@@ -88,5 +99,40 @@ public final class RichTextState {
 
     public func clearSpellChecking() {
         spellIssues = []
+    }
+
+    private func applyUndoSnapshot(
+        _ snapshot: [Block],
+        to dataSource: any RichTextDataSource
+    ) {
+        guard dataSource.blocks != snapshot else { return }
+
+        isApplyingUndoSnapshot = true
+        if !dataSource.blocks.isEmpty {
+            dataSource.deleteBlocks(at: IndexSet(0..<dataSource.blocks.count))
+        }
+        if !snapshot.isEmpty {
+            dataSource.insertBlocks(snapshot, at: 0)
+        }
+        isApplyingUndoSnapshot = false
+    }
+
+    private static func undoDescription(for mutation: RichTextMutation) -> String {
+        switch mutation {
+        case .blocksInserted:
+            "Insert Blocks"
+        case .blocksDeleted:
+            "Delete Blocks"
+        case .blocksMoved:
+            "Move Blocks"
+        case .blockReplaced:
+            "Replace Block"
+        case .textUpdated:
+            "Edit Text"
+        case .typeChanged:
+            "Change Block Type"
+        case .batchUpdate:
+            "Batch Update"
+        }
     }
 }

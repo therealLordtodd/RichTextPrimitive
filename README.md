@@ -41,7 +41,7 @@ struct EditorHost: View {
 
 ## Common Operations
 - Mutate content through `RichTextDataSource` methods such as `insertBlocks(_:at:)`, `replaceBlock(at:with:)`, and `updateTextContent(blockID:content:)`.
-- Use `RichTextState.connectUndo(stack:dataSource:)` to connect an `UndoStack<[Block]>`.
+- Use `RichTextState.connectUndo(stack:dataSource:)` to record data-source edits and apply `UndoStack<[Block]>` undo/redo snapshots back to the editor. Call `disconnectUndo()` before tearing down a custom binding.
 - Pass a custom `SpellChecker` to `RichTextEditor` for deterministic tests or specialized dictionaries.
 - Use `TextContent.plain(_:)` for plain text and `TextContent.sliced(_:)` when rendering fragments.
 - Use `TextStyleSheet.standard` as the default editor stylesheet and override with a custom sheet when embedding.
