@@ -42,6 +42,7 @@ let package = Package(
             name: "RichTextPrimitiveTests",
             dependencies: [
                 "RichTextPrimitive",
+                .product(name: "ClipboardPrimitive", package: "ClipboardPrimitive"),
                 .product(name: "SpellCheckKit", package: "SpellCheckKit"),
             ]
         ),

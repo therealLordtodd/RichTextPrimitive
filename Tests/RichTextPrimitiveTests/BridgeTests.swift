@@ -37,6 +37,33 @@ struct BridgeTests {
         #expect(rangeStart.offset == 2)
     }
 
+    @Test func bridgeBuildsAttributedFragmentsForPastedBlocks() {
+        let dataSource = ArrayRichTextDataSource(
+            blocks: [
+                Block(id: "seed", type: .paragraph, content: .text(.plain("Seed"))),
+            ]
+        )
+
+        let bridge = RichTextContentBridge(dataSource: dataSource, styleSheet: .standard)
+        let fragment = bridge.attributedString(
+            for: [
+                Block(type: .image, content: .image(ImageContent(altText: "Photo"))),
+                Block(
+                    type: .paragraph,
+                    content: .text(
+                        TextContent(
+                            runs: [TextRun(text: "Link", attributes: TextAttributes(link: URL(string: "https://example.com")!))]
+                        )
+                    )
+                ),
+            ]
+        )
+
+        #expect(fragment.string == "Photo\nLink")
+        #expect(fragment.attribute(.richTextBlockType, at: 0, effectiveRange: nil) as? String == BlockType.image.rawValue)
+        #expect(fragment.attribute(.richTextBlockType, at: 6, effectiveRange: nil) as? String == BlockType.paragraph.rawValue)
+    }
+
     @Test func blockBoundaryPositionsStayAnchoredToExpectedBlockEdges() {
         let dataSource = ArrayRichTextDataSource(
             blocks: [

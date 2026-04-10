@@ -1,14 +1,113 @@
 #if canImport(AppKit)
 import AppKit
+import ClipboardPrimitive
 import SwiftUI
+import UniformTypeIdentifiers
+
+private final class RichTextEditorTextView: NSTextView {
+    var handlePaste: ((PasteFormat) -> Bool)?
+
+    override func paste(_ sender: Any?) {
+        if handlePaste?(.original) == true {
+            return
+        }
+
+        super.paste(sender)
+    }
+
+    override func pasteAsPlainText(_ sender: Any?) {
+        if handlePaste?(.plainText) == true {
+            return
+        }
+
+        super.pasteAsPlainText(sender)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let menu = (super.menu(for: event)?.copy() as? NSMenu) ?? super.menu(for: event) else {
+            return nil
+        }
+
+        appendPasteSpecialMenu(to: menu)
+        return menu
+    }
+
+    @objc private func pasteAsMarkdown(_ sender: Any?) {
+        _ = sender
+        _ = handlePaste?(.markdown)
+    }
+
+    @objc private func pasteAsHTML(_ sender: Any?) {
+        _ = sender
+        _ = handlePaste?(.html)
+    }
+
+    @objc private func pasteClipboardAsRichText(_ sender: Any?) {
+        _ = sender
+        _ = handlePaste?(.rtf)
+    }
+
+    @objc private func pasteAsCSV(_ sender: Any?) {
+        _ = sender
+        _ = handlePaste?(.csv)
+    }
+
+    private func appendPasteSpecialMenu(to menu: NSMenu) {
+        let submenu = NSMenu(title: "Paste Special")
+        submenu.addItem(
+            NSMenuItem(
+                title: "Markdown",
+                action: #selector(pasteAsMarkdown(_:)),
+                keyEquivalent: ""
+            )
+        )
+        submenu.addItem(
+            NSMenuItem(
+                title: "HTML",
+                action: #selector(pasteAsHTML(_:)),
+                keyEquivalent: ""
+            )
+        )
+        submenu.addItem(
+            NSMenuItem(
+                title: "Rich Text",
+                action: #selector(pasteClipboardAsRichText(_:)),
+                keyEquivalent: ""
+            )
+        )
+        submenu.addItem(
+            NSMenuItem(
+                title: "CSV",
+                action: #selector(pasteAsCSV(_:)),
+                keyEquivalent: ""
+            )
+        )
+
+        for item in submenu.items {
+            item.target = self
+        }
+
+        menu.addItem(.separator())
+        menu.addItem(
+            NSMenuItem(
+                title: "Paste Special",
+                action: nil,
+                keyEquivalent: ""
+            )
+        )
+        menu.item(at: menu.items.count - 1)?.submenu = submenu
+    }
+}
 
 final class PlatformRichTextView: NSScrollView, NSTextViewDelegate {
-    private let editorTextView = NSTextView(usingTextLayoutManager: true)
+    private let editorTextView = RichTextEditorTextView(usingTextLayoutManager: true)
     private var bridge: RichTextContentBridge?
     private weak var state: RichTextState?
     private weak var observedDataSource: (any RichTextDataSource)?
     private var mutationObserverID: UUID?
     private var isApplyingUpdate = false
+    private let clipboardManager = ClipboardManager()
+    private let pasteHandler = PasteHandler()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -24,6 +123,9 @@ final class PlatformRichTextView: NSScrollView, NSTextViewDelegate {
         editorTextView.isHorizontallyResizable = false
         editorTextView.textContainerInset = NSSize(width: 8, height: 8)
         editorTextView.delegate = self
+        editorTextView.handlePaste = { [weak self] format in
+            self?.handlePasteAction(format) ?? false
+        }
         documentView = editorTextView
     }
 
@@ -137,6 +239,136 @@ final class PlatformRichTextView: NSScrollView, NSTextViewDelegate {
             state.selection = .range(start: start, end: end)
             state.focusedBlockID = start.blockID
         }
+    }
+
+    private func handlePasteAction(_ format: PasteFormat) -> Bool {
+        switch format {
+        case .original:
+            guard shouldCustomHandleOriginalPaste else {
+                return false
+            }
+        case .plainText, .markdown, .html, .rtf, .csv:
+            break
+        }
+
+        Task { [weak self] in
+            await self?.performCustomPaste(format)
+        }
+        return true
+    }
+
+    private var shouldCustomHandleOriginalPaste: Bool {
+        let pasteboard = NSPasteboard.general
+
+        if let fileURLs = pasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL],
+           !fileURLs.isEmpty {
+            return true
+        }
+
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
+           let first = urls.first,
+           !first.isFileURL {
+            return true
+        }
+
+        let types = pasteboard.types?.compactMap { UTType($0.rawValue) } ?? []
+        return types.contains(where: { $0.conforms(to: .image) })
+    }
+
+    private func performCustomPaste(_ format: PasteFormat) async {
+        do {
+            guard let content = try await clipboardManager.paste(as: format) else {
+                NSSound.beep()
+                return
+            }
+
+            let blocks = pasteHandler.blocks(from: content)
+            guard !blocks.isEmpty else {
+                NSSound.beep()
+                return
+            }
+
+            insertPastedBlocks(blocks)
+        } catch {
+            NSSound.beep()
+        }
+    }
+
+    private func insertPastedBlocks(_ blocks: [Block]) {
+        guard let bridge else { return }
+
+        let selectedRange = editorTextView.selectedRange()
+        let fragment = wrappedPasteFragment(
+            bridge.attributedString(for: blocks),
+            for: blocks,
+            replacing: selectedRange
+        )
+
+        if let textStorage = editorTextView.textStorage {
+            textStorage.beginEditing()
+            textStorage.replaceCharacters(in: selectedRange, with: fragment)
+            textStorage.endEditing()
+        }
+
+        let insertionLocation = selectedRange.location + fragment.length
+        editorTextView.setSelectedRange(NSRange(location: insertionLocation, length: 0))
+        editorTextView.didChangeText()
+    }
+
+    private func wrappedPasteFragment(
+        _ fragment: NSAttributedString,
+        for blocks: [Block],
+        replacing selection: NSRange
+    ) -> NSAttributedString {
+        guard shouldInsertAsStandaloneBlocks(blocks) else {
+            return fragment
+        }
+
+        let wrapped = NSMutableAttributedString()
+        let boundaryAttributes = boundaryAttributesForSelection(selection)
+
+        if needsLeadingBoundary(before: selection.location) {
+            wrapped.append(NSAttributedString(string: "\n", attributes: boundaryAttributes))
+        }
+
+        wrapped.append(fragment)
+
+        if needsTrailingBoundary(after: selection.location + selection.length) {
+            wrapped.append(NSAttributedString(string: "\n", attributes: boundaryAttributes))
+        }
+
+        return wrapped
+    }
+
+    private func shouldInsertAsStandaloneBlocks(_ blocks: [Block]) -> Bool {
+        blocks.count > 1 || blocks.contains(where: { $0.type != .paragraph })
+    }
+
+    private func needsLeadingBoundary(before location: Int) -> Bool {
+        guard location > 0 else { return false }
+        let string = editorTextView.string as NSString
+        return string.substring(with: NSRange(location: location - 1, length: 1)) != "\n"
+    }
+
+    private func needsTrailingBoundary(after location: Int) -> Bool {
+        let string = editorTextView.string as NSString
+        guard location < string.length else { return false }
+        return string.substring(with: NSRange(location: location, length: 1)) != "\n"
+    }
+
+    private func boundaryAttributesForSelection(_ selection: NSRange) -> [NSAttributedString.Key: Any] {
+        guard let textStorage = editorTextView.textStorage, textStorage.length > 0 else {
+            return editorTextView.typingAttributes
+        }
+
+        if selection.location > 0 {
+            return textStorage.attributes(at: min(selection.location - 1, textStorage.length - 1), effectiveRange: nil)
+        }
+
+        return textStorage.attributes(at: 0, effectiveRange: nil)
     }
 }
 

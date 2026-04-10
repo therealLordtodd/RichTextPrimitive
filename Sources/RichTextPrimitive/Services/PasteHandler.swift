@@ -1,4 +1,6 @@
+import ClipboardPrimitive
 import Foundation
+import UniformTypeIdentifiers
 
 public struct PasteHandler: Sendable {
     public init() {}
@@ -7,6 +9,66 @@ public struct PasteHandler: Sendable {
         let normalized = plainText.replacingOccurrences(of: "\r\n", with: "\n")
         let lines = normalized.components(separatedBy: "\n")
         return lines.map(parseLine)
+    }
+
+    public func blocks(from content: ClipboardContent) -> [Block] {
+        switch content {
+        case let .text(text):
+            return blocks(from: text)
+        case let .richText(data, type):
+            return blocks(fromRichTextData: data, type: type)
+        case let .image(data, type):
+            return [imageBlock(data: data, type: type)]
+        case let .largeImage(thumbnail, originalFileURL, originalUTType):
+            let data = (try? Data(contentsOf: originalFileURL)) ?? thumbnail
+            return [
+                imageBlock(
+                    data: data,
+                    type: originalUTType,
+                    url: originalFileURL,
+                    altText: displayName(for: originalFileURL)
+                )
+            ]
+        case let .largeData(preview, originalFileURL, originalUTType):
+            if let materialized = materializedContent(
+                preview: preview,
+                originalFileURL: originalFileURL,
+                originalUTType: originalUTType
+            ) {
+                return blocks(from: materialized)
+            }
+
+            return [fileLinkBlock(for: originalFileURL)]
+        case let .url(url):
+            return [linkBlock(label: url.absoluteString, destination: url)]
+        case let .fileURL(urls):
+            return urls.map(block(forFileURL:))
+        case let .custom(data, type):
+            if type.conforms(to: .image) {
+                return [imageBlock(data: data, type: type)]
+            }
+
+            if type.conforms(to: .html)
+                || type.conforms(to: .rtf)
+                || type.conforms(to: .rtfd)
+                || type.conforms(to: .text)
+                || type.conforms(to: .plainText)
+                || type.conforms(to: .utf8PlainText) {
+                return blocks(fromRichTextData: data, type: type)
+            }
+
+            return [
+                Block(
+                    type: .embed,
+                    content: .embed(
+                        EmbedContent(
+                            kind: type.identifier,
+                            metadata: ["byteCount": .int(data.count)]
+                        )
+                    )
+                )
+            ]
+        }
     }
 
     public func blocks(fromHTML html: String) -> [Block] {
@@ -242,5 +304,116 @@ public struct PasteHandler: Sendable {
         guard let lastOrderedList else { return false }
         guard let lastUnorderedList else { return true }
         return lastOrderedList > lastUnorderedList
+    }
+
+    private func blocks(fromRichTextData data: Data, type: UTType) -> [Block] {
+        if type.conforms(to: .html),
+           let html = String(data: data, encoding: .utf8) {
+            let parsed = blocks(fromHTML: html)
+            if !parsed.isEmpty {
+                return parsed
+            }
+        }
+
+        if type.conforms(to: .rtf) || type.conforms(to: .rtfd) {
+            let parsed = blocks(fromRTF: data)
+            if !parsed.isEmpty {
+                return parsed
+            }
+        }
+
+        if (type.conforms(to: .plainText) || type.conforms(to: .text) || type.conforms(to: .utf8PlainText)),
+           let string = String(data: data, encoding: .utf8) {
+            return blocks(from: string)
+        }
+
+        if let plainText = ClipboardFormatter.richTextToPlainText(data, type: type) {
+            return blocks(from: plainText)
+        }
+
+        return []
+    }
+
+    private func materializedContent(
+        preview: Data,
+        originalFileURL: URL,
+        originalUTType: UTType
+    ) -> ClipboardContent? {
+        if originalUTType.conforms(to: .plainText) || originalUTType.conforms(to: .utf8PlainText),
+           let string = String(data: preview, encoding: .utf8)
+                ?? (try? Data(contentsOf: originalFileURL)).flatMap({ String(data: $0, encoding: .utf8) }) {
+            return .text(string)
+        }
+
+        if originalUTType.conforms(to: .html)
+            || originalUTType.conforms(to: .rtf)
+            || originalUTType.conforms(to: .rtfd),
+           let data = try? Data(contentsOf: originalFileURL) {
+            return .richText(data, originalUTType)
+        }
+
+        if originalUTType.conforms(to: .image),
+           let data = try? Data(contentsOf: originalFileURL) {
+            return .image(data, originalUTType)
+        }
+
+        return nil
+    }
+
+    private func block(forFileURL fileURL: URL) -> Block {
+        if let type = UTType(filenameExtension: fileURL.pathExtension),
+           type.conforms(to: .image) {
+            return imageBlock(
+                data: try? Data(contentsOf: fileURL),
+                type: type,
+                url: fileURL,
+                altText: displayName(for: fileURL)
+            )
+        }
+
+        return fileLinkBlock(for: fileURL)
+    }
+
+    private func fileLinkBlock(for fileURL: URL) -> Block {
+        linkBlock(label: displayName(for: fileURL), destination: fileURL)
+    }
+
+    private func linkBlock(label: String, destination: URL) -> Block {
+        Block(
+            type: .paragraph,
+            content: .text(
+                TextContent(
+                    runs: [
+                        TextRun(
+                            text: label,
+                            attributes: TextAttributes(link: destination)
+                        )
+                    ]
+                )
+            )
+        )
+    }
+
+    private func imageBlock(
+        data: Data?,
+        type: UTType,
+        url: URL? = nil,
+        altText: String? = nil
+    ) -> Block {
+        Block(
+            type: .image,
+            content: .image(
+                ImageContent(
+                    url: url,
+                    data: data,
+                    altText: altText ?? type.localizedDescription ?? "Image"
+                )
+            )
+        )
+    }
+
+    private func displayName(for fileURL: URL) -> String {
+        let name = fileURL.deletingPathExtension().lastPathComponent
+        return name.isEmpty ? fileURL.lastPathComponent : name
     }
 }

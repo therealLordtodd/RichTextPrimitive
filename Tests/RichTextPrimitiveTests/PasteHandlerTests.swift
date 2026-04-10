@@ -1,6 +1,8 @@
+import ClipboardPrimitive
 import Foundation
 import Testing
 @testable import RichTextPrimitive
+import UniformTypeIdentifiers
 
 @Suite("PasteHandler Tests")
 struct PasteHandlerTests {
@@ -41,5 +43,68 @@ struct PasteHandlerTests {
         #expect(blocks.count == 2)
         #expect(blocks[0].content.textContent?.plainText == "Alpha")
         #expect(blocks[1].content.textContent?.plainText == "Beta <Gamma>")
+    }
+
+    @Test func clipboardHTMLBecomesStructuredBlocks() {
+        let handler = PasteHandler()
+        let blocks = handler.blocks(
+            from: .richText(
+                Data("<h2>Heading</h2><p>Body</p>".utf8),
+                .html
+            )
+        )
+
+        #expect(blocks.map(\.type) == [.heading, .paragraph])
+        #expect(blocks[0].content.textContent?.plainText == "Heading")
+        #expect(blocks[1].content.textContent?.plainText == "Body")
+    }
+
+    @Test func clipboardURLBecomesLinkedParagraph() {
+        let handler = PasteHandler()
+        let url = URL(string: "https://example.com/spec")!
+        let blocks = handler.blocks(from: .url(url))
+
+        #expect(blocks.count == 1)
+        #expect(blocks[0].type == .paragraph)
+        #expect(blocks[0].content.textContent?.plainText == url.absoluteString)
+        let run = try! #require(blocks[0].content.textContent?.runs.first)
+        #expect(run.attributes.link == url)
+    }
+
+    @Test func clipboardFilesMapImagesAndFileLinks() {
+        let handler = PasteHandler()
+        let imageURL = URL(fileURLWithPath: "/tmp/property-photo.png")
+        let documentURL = URL(fileURLWithPath: "/tmp/closing-disclosure.pdf")
+        let blocks = handler.blocks(from: .fileURL([imageURL, documentURL]))
+
+        #expect(blocks.count == 2)
+        #expect(blocks[0].type == .image)
+        if case let .image(content) = blocks[0].content {
+            #expect(content.url == imageURL)
+            #expect(content.altText == "property-photo")
+        } else {
+            Issue.record("Expected image block for image file")
+        }
+
+        #expect(blocks[1].type == .paragraph)
+        #expect(blocks[1].content.textContent?.plainText == "closing-disclosure")
+        let run = try! #require(blocks[1].content.textContent?.runs.first)
+        #expect(run.attributes.link == documentURL)
+    }
+
+    @Test func customBinaryClipboardContentFallsBackToEmbedBlock() {
+        let handler = PasteHandler()
+        let blocks = handler.blocks(
+            from: .custom(Data([0x01, 0x02, 0x03]), UTType(exportedAs: "com.vantage.binary"))
+        )
+
+        #expect(blocks.count == 1)
+        #expect(blocks[0].type == .embed)
+        if case let .embed(content) = blocks[0].content {
+            #expect(content.kind == "com.vantage.binary")
+            #expect(content.metadata["byteCount"] == .int(3))
+        } else {
+            Issue.record("Expected embed fallback block")
+        }
     }
 }

@@ -79,6 +79,20 @@ final class RichTextContentBridge: NSObject, @preconcurrency NSTextContentStorag
         textContentStorage.attributedString = attributed
     }
 
+    func attributedString(for blocks: [Block]) -> NSAttributedString {
+        let attributed = NSMutableAttributedString()
+
+        for (index, block) in blocks.enumerated() {
+            attributed.append(attributedText(for: block))
+
+            if index < blocks.count - 1 {
+                attributed.append(NSAttributedString(string: "\n"))
+            }
+        }
+
+        return attributed
+    }
+
     func applyRenderedAttributedString(_ attributedString: NSAttributedString) {
         textContentStorage.attributedString = attributedString
     }
