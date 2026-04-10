@@ -96,6 +96,23 @@ struct BridgeTests {
         #expect(bridge.textContentStorage.textLayoutManagers.contains(bridge.textLayoutManager))
     }
 
+    @Test func processEditingSynchronizesFromTextContentStorage() {
+        let dataSource = ArrayRichTextDataSource(
+            blocks: [
+                Block(id: "a", type: .paragraph, content: .text(.plain("Original"))),
+            ]
+        )
+        let bridge = RichTextContentBridge(dataSource: dataSource, styleSheet: .standard)
+        bridge.textContentStorage.attributedString = NSAttributedString(string: "Edited")
+        let range = try! #require(bridge.textRange(for: "a", offset: 0))
+
+        bridge.processEditing(in: range, delta: -2)
+
+        #expect(dataSource.blocks.count == 1)
+        #expect(dataSource.blocks[0].id == "a")
+        #expect(dataSource.blocks[0].content.textContent?.plainText == "Edited")
+    }
+
     @Test func editedTextRoundTripsBackIntoBlocks() {
         let dataSource = ArrayRichTextDataSource(
             blocks: [

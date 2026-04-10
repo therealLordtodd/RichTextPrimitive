@@ -75,6 +75,8 @@ final class RichTextContentBridge: NSObject, @preconcurrency NSTextContentStorag
     func processEditing(in range: NSTextRange, delta: Int) {
         _ = range
         _ = delta
+        guard let attributedString = textContentStorage.attributedString else { return }
+        processAttributedText(attributedString)
     }
 
     func processAttributedText(_ attributedText: NSAttributedString) {
