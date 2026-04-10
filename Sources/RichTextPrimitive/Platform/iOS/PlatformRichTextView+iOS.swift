@@ -27,9 +27,11 @@ final class PlatformRichTextView: UITextView, UITextViewDelegate {
     func configure(
         state: RichTextState,
         dataSource: any RichTextDataSource,
-        styleSheet: TextStyleSheet
+        styleSheet: TextStyleSheet,
+        spellIssues: [RichTextSpellIssue]
     ) {
         editorState = state
+        _ = spellIssues
 
         if bridge.map({ ObjectIdentifier($0.dataSource as AnyObject) }) != ObjectIdentifier(dataSource as AnyObject) {
             if let observedDataSource, let mutationObserverID {
@@ -63,7 +65,8 @@ final class PlatformRichTextView: UITextView, UITextViewDelegate {
         guard let bridge else { return }
         isApplyingUpdate = true
         bridge.applyBlocks(bridge.dataSource.blocks)
-        attributedText = bridge.cachedAttributedString
+        attributedText = editorState.map { bridge.attributedString(spellIssues: $0.spellIssues) }
+            ?? bridge.cachedAttributedString
         if let editorState {
             applySelection(from: editorState)
         }
@@ -115,15 +118,16 @@ struct PlatformRichTextViewRepresentable: UIViewRepresentable {
     var state: RichTextState
     let dataSource: any RichTextDataSource
     let styleSheet: TextStyleSheet
+    let spellIssues: [RichTextSpellIssue]
 
     func makeUIView(context: Context) -> PlatformRichTextView {
         let view = PlatformRichTextView()
-        view.configure(state: state, dataSource: dataSource, styleSheet: styleSheet)
+        view.configure(state: state, dataSource: dataSource, styleSheet: styleSheet, spellIssues: spellIssues)
         return view
     }
 
     func updateUIView(_ uiView: PlatformRichTextView, context: Context) {
-        uiView.configure(state: state, dataSource: dataSource, styleSheet: styleSheet)
+        uiView.configure(state: state, dataSource: dataSource, styleSheet: styleSheet, spellIssues: spellIssues)
     }
 }
 #endif

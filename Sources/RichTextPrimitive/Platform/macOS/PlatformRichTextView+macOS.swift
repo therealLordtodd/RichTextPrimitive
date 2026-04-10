@@ -35,9 +35,11 @@ final class PlatformRichTextView: NSScrollView, NSTextViewDelegate {
     func configure(
         state: RichTextState,
         dataSource: any RichTextDataSource,
-        styleSheet: TextStyleSheet
+        styleSheet: TextStyleSheet,
+        spellIssues: [RichTextSpellIssue]
     ) {
         self.state = state
+        _ = spellIssues
 
         if bridge.map({ ObjectIdentifier($0.dataSource as AnyObject) }) != ObjectIdentifier(dataSource as AnyObject) {
             if let observedDataSource, let mutationObserverID {
@@ -74,7 +76,9 @@ final class PlatformRichTextView: NSScrollView, NSTextViewDelegate {
 
         isApplyingUpdate = true
         bridge.applyBlocks(bridge.dataSource.blocks)
-        editorTextView.textStorage?.setAttributedString(bridge.cachedAttributedString)
+        let rendered = state.map { bridge.attributedString(spellIssues: $0.spellIssues) }
+            ?? bridge.cachedAttributedString
+        editorTextView.textStorage?.setAttributedString(rendered)
 
         if let state {
             applySelection(from: state)
@@ -129,15 +133,16 @@ struct PlatformRichTextViewRepresentable: NSViewRepresentable {
     var state: RichTextState
     let dataSource: any RichTextDataSource
     let styleSheet: TextStyleSheet
+    let spellIssues: [RichTextSpellIssue]
 
     func makeNSView(context: Context) -> PlatformRichTextView {
         let view = PlatformRichTextView()
-        view.configure(state: state, dataSource: dataSource, styleSheet: styleSheet)
+        view.configure(state: state, dataSource: dataSource, styleSheet: styleSheet, spellIssues: spellIssues)
         return view
     }
 
     func updateNSView(_ nsView: PlatformRichTextView, context: Context) {
-        nsView.configure(state: state, dataSource: dataSource, styleSheet: styleSheet)
+        nsView.configure(state: state, dataSource: dataSource, styleSheet: styleSheet, spellIssues: spellIssues)
     }
 }
 #endif

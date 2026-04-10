@@ -64,7 +64,7 @@ final class RichTextContentBridge {
 
     func processAttributedText(_ attributedText: NSAttributedString) {
         let rebuiltBlocks = Self.blocks(
-            from: attributedText,
+            from: Self.attributedTextByRemovingSpellCheckOverlays(from: attributedText),
             preserving: dataSource.blocks,
             styleSheet: styleSheet
         )
@@ -118,8 +118,81 @@ final class RichTextContentBridge {
         return min(range.lowerBound + max(offset, 0), range.upperBound)
     }
 
+    func attributedString(spellIssues: [RichTextSpellIssue]) -> NSAttributedString {
+        guard !spellIssues.isEmpty else { return cachedAttributedString }
+
+        let attributed = NSMutableAttributedString(attributedString: cachedAttributedString)
+        for issue in spellIssues {
+            guard let start = characterOffset(for: issue.blockID, offset: issue.range.lowerBound),
+                  let end = characterOffset(for: issue.blockID, offset: issue.range.upperBound),
+                  end > start,
+                  start < attributed.length else { continue }
+
+            let range = NSRange(
+                location: start,
+                length: min(end, attributed.length) - start
+            )
+            Self.applySpellCheckOverlay(issue: issue, to: attributed, range: range)
+        }
+
+        return attributed
+    }
+
+    static func attributedTextByRemovingSpellCheckOverlays(
+        from attributedText: NSAttributedString
+    ) -> NSAttributedString {
+        guard attributedText.length > 0 else { return attributedText }
+
+        let stripped = NSMutableAttributedString(attributedString: attributedText)
+        let fullRange = NSRange(location: 0, length: stripped.length)
+        stripped.enumerateAttribute(.richTextSpellIssueID, in: fullRange) { value, range, _ in
+            guard value != nil else { return }
+
+            if let originalUnderline = stripped.attribute(.richTextOriginalUnderlineStyle, at: range.location, effectiveRange: nil) {
+                stripped.addAttribute(.underlineStyle, value: originalUnderline, range: range)
+            } else {
+                stripped.removeAttribute(.underlineStyle, range: range)
+            }
+
+            if let originalUnderlineColor = stripped.attribute(.richTextOriginalUnderlineColor, at: range.location, effectiveRange: nil) {
+                stripped.addAttribute(.underlineColor, value: originalUnderlineColor, range: range)
+            } else {
+                stripped.removeAttribute(.underlineColor, range: range)
+            }
+
+            stripped.removeAttribute(.richTextSpellIssueID, range: range)
+            stripped.removeAttribute(.richTextOriginalUnderlineStyle, range: range)
+            stripped.removeAttribute(.richTextOriginalUnderlineColor, range: range)
+        }
+
+        return stripped
+    }
+
     private func clampedBlockOffset(for characterOffset: Int, in range: Range<Int>) -> Int {
         min(max(characterOffset - range.lowerBound, 0), range.count)
+    }
+
+    private static func applySpellCheckOverlay(
+        issue: RichTextSpellIssue,
+        to attributed: NSMutableAttributedString,
+        range: NSRange
+    ) {
+        attributed.enumerateAttributes(in: range) { attributes, subrange, _ in
+            var overlay: [NSAttributedString.Key: Any] = [
+                .richTextSpellIssueID: issue.id.uuidString,
+                .underlineStyle: NSUnderlineStyle.single.rawValue | NSUnderlineStyle.patternDot.rawValue,
+                .underlineColor: PlatformColor.systemRed,
+            ]
+
+            if let underlineStyle = attributes[.underlineStyle] {
+                overlay[.richTextOriginalUnderlineStyle] = underlineStyle
+            }
+            if let underlineColor = attributes[.underlineColor] {
+                overlay[.richTextOriginalUnderlineColor] = underlineColor
+            }
+
+            attributed.addAttributes(overlay, range: subrange)
+        }
     }
 
     private func syncDataSource(with blocks: [Block]) {
@@ -764,8 +837,11 @@ private final class BridgeTextLocation: NSObject, NSTextLocation {
     }
 }
 
-private extension NSAttributedString.Key {
+extension NSAttributedString.Key {
     static let richTextBlockID = NSAttributedString.Key("RichTextPrimitive.blockID")
     static let richTextBlockType = NSAttributedString.Key("RichTextPrimitive.blockType")
     static let richTextBlockMetadata = NSAttributedString.Key("RichTextPrimitive.blockMetadata")
+    static let richTextSpellIssueID = NSAttributedString.Key("RichTextPrimitive.spellIssueID")
+    static let richTextOriginalUnderlineStyle = NSAttributedString.Key("RichTextPrimitive.originalUnderlineStyle")
+    static let richTextOriginalUnderlineColor = NSAttributedString.Key("RichTextPrimitive.originalUnderlineColor")
 }

@@ -1,4 +1,5 @@
 import Foundation
+import SpellCheckKit
 import Testing
 @testable import RichTextPrimitive
 import ColorPickerPrimitive
@@ -288,6 +289,32 @@ struct BridgeTests {
 
         let run = try! #require(dataSource.blocks[0].content.textContent?.runs.first)
         #expect(run.attributes == .plain)
+    }
+
+    @Test func spellCheckOverlaysDoNotPersistAsInlineFormatting() {
+        let dataSource = ArrayRichTextDataSource(
+            blocks: [
+                Block(id: "a", type: .paragraph, content: .text(.plain("teh word"))),
+            ]
+        )
+        let bridge = RichTextContentBridge(dataSource: dataSource, styleSheet: .standard)
+        let issue = RichTextSpellIssue(
+            blockID: "a",
+            range: 0..<3,
+            type: .spelling,
+            message: "Possible misspelling: teh",
+            suggestions: ["the"],
+            word: "teh"
+        )
+
+        let rendered = bridge.attributedString(spellIssues: [issue])
+        #expect(rendered.attribute(.underlineStyle, at: 0, effectiveRange: nil) != nil)
+
+        bridge.processAttributedText(rendered)
+
+        let run = try! #require(dataSource.blocks[0].content.textContent?.runs.first)
+        #expect(run.text == "teh word")
+        #expect(!run.attributes.underline)
     }
 }
 

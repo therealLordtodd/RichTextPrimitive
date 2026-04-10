@@ -17,6 +17,7 @@ let package = Package(
         .package(path: "../ClipboardPrimitive"),
         .package(path: "../ColorPickerPrimitive"),
         .package(path: "../KeyboardShortcutPrimitive"),
+        .package(path: "../SpellCheckKit"),
         .package(path: "../SyntaxHighlightPrimitive"),
         .package(path: "../TypographyPrimitive"),
     ],
@@ -28,6 +29,7 @@ let package = Package(
                 .product(name: "ClipboardPrimitive", package: "ClipboardPrimitive"),
                 .product(name: "ColorPickerPrimitive", package: "ColorPickerPrimitive"),
                 .product(name: "KeyboardShortcutProtocol", package: "KeyboardShortcutPrimitive"),
+                .product(name: "SpellCheckKit", package: "SpellCheckKit"),
                 .product(name: "SyntaxHighlightPrimitive", package: "SyntaxHighlightPrimitive"),
                 .product(name: "TypographyPrimitive", package: "TypographyPrimitive"),
             ]
@@ -38,7 +40,10 @@ let package = Package(
         ),
         .testTarget(
             name: "RichTextPrimitiveTests",
-            dependencies: ["RichTextPrimitive"]
+            dependencies: [
+                "RichTextPrimitive",
+                .product(name: "SpellCheckKit", package: "SpellCheckKit"),
+            ]
         ),
         .testTarget(
             name: "RichTextPrimitiveAITests",

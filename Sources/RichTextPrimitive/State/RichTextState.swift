@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import Observation
+import SpellCheckKit
 import UndoPrimitive
 
 @MainActor
@@ -12,8 +13,12 @@ public final class RichTextState {
     public var writingMode: any WritingMode
     public var focusedBlockID: BlockID?
     public var zoomLevel: CGFloat
+    public var isSpellCheckingEnabled: Bool
+    public var spellCheckLanguage: String
+    public var spellIssues: [RichTextSpellIssue]
 
     private var undoObserverID: UUID?
+    private let spellCheckingService = SpellCheckingService()
 
     public init(
         selection: TextSelection = .blockSelection([]),
@@ -21,7 +26,9 @@ public final class RichTextState {
         findState: FindReplaceState? = nil,
         writingMode: any WritingMode = StandardMode(),
         focusedBlockID: BlockID? = nil,
-        zoomLevel: CGFloat = 1.0
+        zoomLevel: CGFloat = 1.0,
+        isSpellCheckingEnabled: Bool = true,
+        spellCheckLanguage: String = Locale.current.language.languageCode?.identifier ?? "en"
     ) {
         self.selection = selection
         self.activeAttributes = activeAttributes
@@ -29,6 +36,9 @@ public final class RichTextState {
         self.writingMode = writingMode
         self.focusedBlockID = focusedBlockID
         self.zoomLevel = zoomLevel
+        self.isSpellCheckingEnabled = isSpellCheckingEnabled
+        self.spellCheckLanguage = spellCheckLanguage
+        self.spellIssues = []
     }
 
     public func connectUndo(
@@ -58,5 +68,25 @@ public final class RichTextState {
             }
             stack.push(dataSource.blocks, description: description)
         }
+    }
+
+    public func refreshSpellChecking(
+        dataSource: any RichTextDataSource,
+        checker: any SpellChecker
+    ) async {
+        guard isSpellCheckingEnabled else {
+            spellIssues = []
+            return
+        }
+
+        spellIssues = await spellCheckingService.issues(
+            in: dataSource.blocks,
+            language: spellCheckLanguage,
+            checker: checker
+        )
+    }
+
+    public func clearSpellChecking() {
+        spellIssues = []
     }
 }
