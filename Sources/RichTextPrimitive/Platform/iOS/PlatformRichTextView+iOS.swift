@@ -131,20 +131,11 @@ final class PlatformRichTextView: UITextView, UITextViewDelegate {
 
     private func applySelection(from state: RichTextState) {
         guard let bridge else { return }
-        switch state.selection {
-        case let .caret(blockID, offset):
-            if let location = bridge.characterOffset(for: blockID, offset: offset) {
-                applySelectedRange(NSRange(location: location, length: 0))
-            }
-        case let .range(start, end):
-            if let startLocation = bridge.characterOffset(for: start.blockID, offset: start.offset),
-               let endLocation = bridge.characterOffset(for: end.blockID, offset: end.offset) {
-                applySelectedRange(
-                    NSRange(location: startLocation, length: max(endLocation - startLocation, 0))
-                )
-            }
-        case .blockSelection:
-            break
+        if let range = bridge.selectedRange(
+            for: state.selection,
+            preferredBlockID: state.focusedBlockID
+        ) {
+            applySelectedRange(range)
         }
     }
 

@@ -160,6 +160,48 @@ final class RichTextContentBridge: NSObject, @preconcurrency NSTextContentStorag
         return min(range.lowerBound + max(offset, 0), range.upperBound)
     }
 
+    func selectedRange(
+        for selection: TextSelection,
+        preferredBlockID: BlockID? = nil
+    ) -> NSRange? {
+        switch selection {
+        case let .caret(blockID, offset):
+            guard let location = characterOffset(for: blockID, offset: offset) else { return nil }
+            return NSRange(location: location, length: 0)
+        case let .range(start, end):
+            guard let startLocation = characterOffset(for: start.blockID, offset: start.offset),
+                  let endLocation = characterOffset(for: end.blockID, offset: end.offset) else {
+                return nil
+            }
+
+            let lowerBound = min(startLocation, endLocation)
+            let upperBound = max(startLocation, endLocation)
+            return NSRange(location: lowerBound, length: upperBound - lowerBound)
+        case let .blockSelection(blockIDs):
+            guard !blockIDs.isEmpty else { return nil }
+
+            if let preferredBlockID,
+               blockIDs.contains(preferredBlockID),
+               let preferredRange = blockRanges[preferredBlockID] {
+                return NSRange(location: preferredRange.lowerBound, length: preferredRange.count)
+            }
+
+            let selectedRanges = blockIDs
+                .compactMap { blockID in blockRanges[blockID] }
+                .sorted { $0.lowerBound < $1.lowerBound }
+
+            guard let firstRange = selectedRanges.first,
+                  let lastRange = selectedRanges.last else {
+                return nil
+            }
+
+            return NSRange(
+                location: firstRange.lowerBound,
+                length: lastRange.upperBound - firstRange.lowerBound
+            )
+        }
+    }
+
     func attributedString(spellIssues: [RichTextSpellIssue]) -> NSAttributedString {
         guard !spellIssues.isEmpty else { return cachedAttributedString }
 

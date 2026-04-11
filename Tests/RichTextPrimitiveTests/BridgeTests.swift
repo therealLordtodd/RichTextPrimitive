@@ -103,6 +103,26 @@ struct BridgeTests {
         #expect(resolved.offset == 5)
     }
 
+    @Test func blockSelectionResolvesToVisibleBlockRange() {
+        let dataSource = ArrayRichTextDataSource(
+            blocks: [
+                Block(id: "a", type: .paragraph, content: .text(.plain("Alpha"))),
+                Block(id: "b", type: .paragraph, content: .text(.plain("Beta"))),
+                Block(id: "c", type: .paragraph, content: .text(.plain("Gamma"))),
+            ]
+        )
+
+        let bridge = RichTextContentBridge(dataSource: dataSource, styleSheet: .standard)
+        let preferredRange = bridge.selectedRange(
+            for: .blockSelection(["a", "c"]),
+            preferredBlockID: "c"
+        )
+        let fallbackRange = bridge.selectedRange(for: .blockSelection(["a", "c"]))
+
+        #expect(preferredRange == NSRange(location: 11, length: 5))
+        #expect(fallbackRange == NSRange(location: 0, length: 16))
+    }
+
     @Test func textContentStorageVendsBlockAwareTextKitElements() {
         let dataSource = ArrayRichTextDataSource(
             blocks: [

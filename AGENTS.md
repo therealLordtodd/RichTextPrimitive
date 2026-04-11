@@ -14,14 +14,16 @@ RichTextPrimitive is the cross-platform block rich text editor foundation. It ow
 - `RichTextEditor` must remain cross-platform for macOS 15 and iOS 17. AppKit/UIKit specifics belong under platform/internal seams.
 - The optional block navigator rail must stay driven by the same `RichTextDataSource`; do not introduce a second source of truth for reorder UI.
 - The TextKit 2 bridge in `RichTextContentBridge` is the source for rendered attributed storage. Keep macOS and iOS layout-manager attachment paths symmetric.
+- `TextSelection.blockSelection` is a real selection mode, not a placeholder. Platform bridges must resolve it to a visible range and scroll target for review/object focus.
 - Keep spell checking behind the `SpellChecker` protocol. `SystemSpellChecker` is the default, but tests should be able to inject fakes.
+- Preserve native AppKit/UIKit edit menus on the live text surface. Extend them for clipboard-backed paste-special behavior instead of replacing them with a custom context menu.
 - Do not make `RichTextPrimitiveAI` a dependency of the core target; the AI target depends on core, not the reverse.
 
 ## Testing
 - Run `swift test` before committing.
 - Run an iOS simulator package build after touching platform view, bridge, spell-check, paste, or dependency code.
 - Add block navigator coverage when changing block summaries, reorder plumbing, or focus synchronization.
-- Add bridge coverage in `BridgeTests` whenever TextKit storage, block layout, or attributed rendering changes.
+- Add bridge coverage in `BridgeTests` whenever TextKit storage, block layout, attributed rendering, or block-selection mapping changes.
 - Add mutation coverage in `DataSourceTests` and `RichTextStateTests` when changing data-source or state behavior.
 
 ## Project Management
