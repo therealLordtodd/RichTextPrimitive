@@ -1,8 +1,125 @@
 # RichTextPrimitive
 
-RichTextPrimitive provides a block-based rich text editor model and SwiftUI editor primitive for macOS and iOS. It is designed to be embedded by higher-level document products while keeping the editable text model portable and testable, with shared paste-special, spell-check, block-selection, and block-reorder behavior across platforms.
+`RichTextPrimitive` is the block-based editing layer in the document stack.
 
-## Quick Start
+It gives you:
+
+- a portable rich-text block model
+- a data-source protocol for mutable editor content
+- a SwiftUI editor surface
+- undo integration
+- spell-check integration
+- paste-special and block-editing services
+- an optional AI product for tool-driven document editing
+
+Use it when your app needs a structured editor, not just an attributed string text view.
+
+Do not use it when a plain `TextEditor`, simple markdown field, or small note input is enough. This package is for apps that want block-level editing, durable model semantics, and editor services that can scale into larger document products.
+
+## Products
+
+`RichTextPrimitive` ships as two products:
+
+### `RichTextPrimitive`
+
+The core editor runtime:
+
+- block model
+- text and style model
+- data source protocol
+- editor state
+- SwiftUI editor
+- editing services
+
+### `RichTextPrimitiveAI`
+
+The optional AI-facing layer:
+
+- `DocumentAITool`
+- `DocumentAIContext`
+- `BlockMutation`
+- tool-provider protocols
+
+That separation matters. Apps can adopt the editor without pulling AI-specific concepts into the core dependency graph.
+
+## Core model
+
+### `Block`
+
+`Block` is the basic content unit.
+
+Important related types:
+
+- `BlockID`
+- `BlockType`
+- `BlockContent`
+- `BlockMetadata`
+
+This is the real source of truth for document content in the package.
+
+### `TextContent`, `TextRun`, and `TextAttributes`
+
+These types model inline text content and formatting inside text-bearing blocks.
+
+That lets the package keep:
+
+- a structured editor model
+- portable formatting semantics
+- testable editing behavior outside platform text views
+
+### `RichTextDataSource`
+
+`RichTextDataSource` is the mutation boundary for the editor.
+
+It exposes:
+
+- current `blocks`
+- insert, delete, move, and replace operations
+- text updates
+- block-type updates
+- mutation observers
+
+If your app has custom persistence or collaboration logic, this protocol is one of the most important seams in the package.
+
+### `ArrayRichTextDataSource`
+
+The in-memory implementation of `RichTextDataSource`.
+
+Use it when:
+
+- you want the simplest working editor host
+- your content is local and session-bound
+- you are prototyping before moving to a custom store
+
+### `RichTextState`
+
+`RichTextState` is the UI-facing editor state.
+
+It owns:
+
+- current selection
+- active text attributes
+- find/replace state
+- writing mode
+- focused block ID
+- zoom level
+- spell-check configuration and issues
+
+This is the main state object you keep alive alongside the data source.
+
+### `RichTextEditor`
+
+`RichTextEditor` is the SwiftUI editing surface.
+
+It takes:
+
+- a `RichTextState`
+- a `RichTextDataSource`
+- an optional `TextStyleSheet`
+- an optional spell checker
+- an option to show the block navigator
+
+## Quick start
 
 ```swift
 import RichTextPrimitive
@@ -16,6 +133,7 @@ let dataSource = ArrayRichTextDataSource(
         )
     ]
 )
+
 let state = RichTextState()
 
 struct EditorHost: View {
@@ -23,51 +141,210 @@ struct EditorHost: View {
     let dataSource: ArrayRichTextDataSource
 
     var body: some View {
-        RichTextEditor(state: state, dataSource: dataSource)
+        RichTextEditor(
+            state: state,
+            dataSource: dataSource
+        )
     }
 }
 ```
 
-## Key Types
-- `Block`, `BlockID`, `BlockType`, and `BlockContent`: The portable block document model.
-- `TextContent`, `TextRun`, and `TextAttributes`: Inline text and styling model.
-- `RichTextDataSource`: MainActor mutation boundary for block collections.
-- `ArrayRichTextDataSource`: In-memory observable data source.
-- `RichTextState`: Selection, active attributes, find state, writing mode, zoom, and spell-check state.
-- `RichTextEditor`: SwiftUI editor view backed by platform TextKit integration.
-- `RichTextBlockNavigator`: Optional block outline and drag-to-reorder rail used by higher-level hosts such as `DocumentPrimitive`.
-- `TextStyleSheet` and `ParagraphStyle`: Default, heading, quote, code, list, and custom paragraph styling.
-- `TextFormatting`, `BlockSplitMerge`, `ListContinuation`, `PasteHandler`, and `SpellCheckingService`: Editing services.
-- `DocumentAITool`, `DocumentAIContext`, and `BlockMutation`: Optional AI tool surface from `RichTextPrimitiveAI`.
+That is the simplest correct host shape:
 
-## Common Operations
-- Mutate content through `RichTextDataSource` methods such as `insertBlocks(_:at:)`, `replaceBlock(at:with:)`, and `updateTextContent(blockID:content:)`.
-- Use `RichTextState.connectUndo(stack:dataSource:)` to record data-source edits and apply `UndoStack<[Block]>` undo/redo snapshots back to the editor. Call `disconnectUndo()` before tearing down a custom binding.
-- Pass a custom `SpellChecker` to `RichTextEditor` for deterministic tests or specialized dictionaries.
-- Set `showsBlockNavigator: true` when the host wants a drag-reorder block rail backed by `DragAndDropPrimitive` and the same `RichTextDataSource`.
-- Use `PasteHandler` with `ClipboardPrimitive.ClipboardContent` when hosts need deterministic block conversion for HTML, RTF, URLs, files, or pasted images. On macOS and iOS, `RichTextEditor` extends the native edit menu with `Paste Special` actions backed by that same conversion path.
-- Use `TextSelection.blockSelection` when higher-level hosts need object-style selection or review focus. The platform bridges map block selections to a visible text range and scroll target instead of treating them as a no-op.
-- Use `TextContent.plain(_:)` for plain text and `TextContent.sliced(_:)` when rendering fragments.
-- Use `TextStyleSheet.standard` as the default editor stylesheet and override with a custom sheet when embedding.
+1. one data source
+2. one editor state
+3. one editor view
 
-## Platform Notes
-- The package supports macOS 15 and iOS 17.
-- The editor uses platform TextKit paths internally. Keep macOS and iOS behavior aligned when touching layout, storage, selection, or spell-check refresh.
-- Preserve native AppKit/UIKit edit menus on the live editor surface. Extend them with clipboard-backed `Paste Special` actions rather than replacing them with a custom context menu.
-- `RichTextPrimitiveAI` is a separate product so hosts can opt into AI tooling without coupling the core editor to AI features.
+## Concrete examples
 
-## Testing
+### 1. Show the block navigator
 
-Run:
-
-```bash
-swift test
+```swift
+RichTextEditor(
+    state: state,
+    dataSource: dataSource,
+    showsBlockNavigator: true
+)
 ```
 
-For platform-sensitive changes, also run:
+This is useful in longer documents where block structure matters and users may want drag-based reordering or quick block focus changes.
 
-```bash
-xcodebuild build -scheme RichTextPrimitive-Package -destination 'generic/platform=iOS Simulator' -quiet
+### 2. Connect undo
+
+```swift
+import UndoPrimitive
+
+let undoStack = UndoStack<[Block]>(initialState: dataSource.blocks)
+state.connectUndo(stack: undoStack, dataSource: dataSource)
 ```
 
-Add bridge coverage whenever TextKit storage, attributed rendering, or block-selection mapping changes.
+Disconnect it when the editor host tears down:
+
+```swift
+state.disconnectUndo()
+```
+
+### 3. Run spell checking with a deterministic checker in tests
+
+```swift
+RichTextEditor(
+    state: state,
+    dataSource: dataSource,
+    spellChecker: FakeSpellChecker()
+)
+```
+
+This is a good seam for tests or for specialized dictionaries in domain apps.
+
+### 4. Use paste conversion without the full editor
+
+```swift
+let handler = PasteHandler()
+let importedBlocks = handler.blocks(from: markdownString)
+dataSource.insertBlocks(importedBlocks, at: dataSource.blocks.count)
+```
+
+Or from richer clipboard content:
+
+```swift
+let blocks = handler.blocks(from: clipboardContent)
+```
+
+This is a good reminder that the services are useful outside the editor view itself.
+
+### 5. Use a custom stylesheet
+
+```swift
+let styleSheet = TextStyleSheet.standard
+
+RichTextEditor(
+    state: state,
+    dataSource: dataSource,
+    styleSheet: styleSheet
+)
+```
+
+### 6. Adopt the AI layer only when needed
+
+```swift
+import RichTextPrimitiveAI
+
+let tool = DocumentAITool(
+    name: "summarize-selection",
+    description: "Summarize the selected blocks",
+    scope: .selection
+) { context in
+    []
+}
+```
+
+The important point is architectural: AI lives in the separate product, not the editor core.
+
+## Editing services
+
+The package includes a set of plain service types that keep common editing behaviors out of the platform bridge code.
+
+Important ones:
+
+- `TextFormatting`
+- `BlockSplitMerge`
+- `ListContinuation`
+- `PasteHandler`
+- `SpellCheckingService`
+
+These are useful when:
+
+- your host app wants deterministic editing logic
+- you need testable formatting behavior
+- you want to reuse the same conversion or mutation rules outside the visible editor
+
+## How to wire it into your app
+
+### Keep the block model as the source of truth
+
+Do not treat the platform text view as the durable document model.
+
+The healthy pattern is:
+
+- your app owns a `RichTextDataSource`
+- the data source owns `[Block]`
+- `RichTextEditor` renders and mutates through that source
+
+That is what keeps the model portable and testable.
+
+### Choose the data-source strategy early
+
+Start with `ArrayRichTextDataSource` if you want the fastest path to a working editor.
+
+Move to a custom `RichTextDataSource` when you need:
+
+- persistence
+- collaboration
+- document partitioning
+- custom mutation auditing
+
+### Keep one `RichTextState` per editor session
+
+`RichTextState` is not just transient UI decoration. It carries important editing state like selection, active formatting context, find state, spell-check issues, and zoom level.
+
+### Treat `RichTextPrimitive` as the editor layer, not the full document layer
+
+This package is strongest when embedded by a higher-level host that owns:
+
+- document metadata
+- sections or pages
+- export workflow
+- comments and review navigation
+- app-level persistence
+
+That is exactly why `DocumentPrimitive` exists above it.
+
+## A strong host-app pattern
+
+```swift
+@MainActor
+final class NoteEditorController {
+    let state = RichTextState()
+    let dataSource: ArrayRichTextDataSource
+
+    init(initialBlocks: [Block]) {
+        self.dataSource = ArrayRichTextDataSource(blocks: initialBlocks)
+    }
+}
+```
+
+Then in SwiftUI:
+
+```swift
+RichTextEditor(
+    state: controller.state,
+    dataSource: controller.dataSource,
+    showsBlockNavigator: true
+)
+```
+
+That keeps the package in its best role: the editing engine and structured content model.
+
+## Constraints and caveats
+
+- macOS 15+ and iOS 17+
+- the package is block-based by design; it is not trying to be a raw attributed-string editor
+- `RichTextState` and the editor live on the main actor
+- platform text integration is internal, but the durable content model is still the block data source
+- AI functionality is opt-in through the separate `RichTextPrimitiveAI` product
+
+## When it is the right fit
+
+`RichTextPrimitive` is a good fit for:
+
+- note editors
+- structured writing tools
+- editor surfaces inside larger document apps
+- apps that need consistent paste and spell-check behavior
+- products that may later grow into page/section-oriented document editors
+
+It is less useful for:
+
+- tiny text inputs
+- plain markdown text areas
+- apps that do not need block structure or editor services
