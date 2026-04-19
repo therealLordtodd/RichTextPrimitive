@@ -231,6 +231,7 @@ struct RichTextBlockNavigatorItem: Identifiable, Equatable, Sendable {
 struct RichTextBlockNavigator: View {
     @ObservedObject var controller: RichTextBlockNavigatorController
     let focusedBlockID: BlockID?
+    let style: RichTextNavigatorStyle
     let onSelect: (BlockID) -> Void
 
     var body: some View {
@@ -241,50 +242,53 @@ struct RichTextBlockNavigator: View {
                     set: { controller.items = $0 }
                 ),
                 showsDragHandles: true,
-                style: navigatorStyle,
+                style: style.reorderableStyle,
                 onReorder: controller.applyReorder
             ) { item in
                 blockRow(item)
             }
-            .frame(width: 220, alignment: .topLeading)
-            .padding(12)
-            .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .frame(width: style.navigatorWidth, alignment: .topLeading)
+            .padding(style.navigatorPadding)
+            .background(
+                style.backgroundColor,
+                in: RoundedRectangle(cornerRadius: style.navigatorCornerRadius, style: .continuous)
+            )
             .accessibilityLabel("Block navigator")
         }
     }
 
     private func blockRow(_ item: RichTextBlockNavigatorItem) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: style.rowIconTextSpacing) {
             Image(systemName: item.iconName)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(focusedBlockID == item.id ? Color.accentColor : Color.secondary)
-                .frame(width: 18, alignment: .center)
+                .font(style.iconFont)
+                .foregroundStyle(focusedBlockID == item.id ? style.iconFocusedColor : style.iconDefaultColor)
+                .frame(width: style.iconWidth, alignment: .center)
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: style.rowTextLineSpacing) {
+                HStack(spacing: style.titleIndexSpacing) {
                     Text(item.title)
-                        .font(.subheadline.weight(.semibold))
+                        .font(style.titleFont)
                         .lineLimit(1)
                     Spacer(minLength: 0)
                     Text("\(item.index + 1)")
-                        .font(.caption2.monospacedDigit())
+                        .font(style.indexFont)
                         .foregroundStyle(.secondary)
                 }
 
                 Text(item.kindLabel)
-                    .font(.caption)
+                    .font(style.kindFont)
                     .foregroundStyle(.secondary)
 
                 if let subtitle = item.subtitle {
                     Text(subtitle)
-                        .font(.caption)
+                        .font(style.subtitleFont)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
             }
         }
-        .padding(.vertical, 2)
-        .padding(.horizontal, 2)
+        .padding(.vertical, style.rowVerticalPadding)
+        .padding(.horizontal, style.rowHorizontalPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(selectionBackground(for: item.id))
         .contentShape(Rectangle())
@@ -297,23 +301,11 @@ struct RichTextBlockNavigator: View {
 
     @ViewBuilder
     private func selectionBackground(for blockID: BlockID) -> some View {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
+        RoundedRectangle(cornerRadius: style.selectionCornerRadius, style: .continuous)
             .fill(
                 focusedBlockID == blockID
-                    ? Color.accentColor.opacity(0.14)
+                    ? style.selectionColor
                     : Color.clear
             )
-    }
-
-    private var navigatorStyle: ReorderableContainerStyle {
-        ReorderableContainerStyle(
-            dragHandleColor: .secondary,
-            targetedBackgroundColor: Color.accentColor.opacity(0.12),
-            idleBackgroundColor: .clear,
-            previewBackgroundColor: .white,
-            previewBackgroundOpacity: 0.98,
-            previewBorderColor: Color.accentColor,
-            previewBorderOpacity: 0.25
-        )
     }
 }

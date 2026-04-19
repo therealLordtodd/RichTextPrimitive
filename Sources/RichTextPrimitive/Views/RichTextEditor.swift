@@ -9,27 +9,31 @@ public struct RichTextEditor: View {
     private let styleSheet: TextStyleSheet
     private let spellChecker: (any SpellChecker)?
     private let showsBlockNavigator: Bool
+    private let navigatorStyle: RichTextNavigatorStyle
 
     public init(
         state: RichTextState,
         dataSource: any RichTextDataSource,
         styleSheet: TextStyleSheet = .standard,
         spellChecker: (any SpellChecker)? = SystemSpellChecker(),
-        showsBlockNavigator: Bool = false
+        showsBlockNavigator: Bool = false,
+        navigatorStyle: RichTextNavigatorStyle = .default
     ) {
         self.state = state
         self.dataSource = dataSource
         self.styleSheet = styleSheet
         self.spellChecker = spellChecker
         self.showsBlockNavigator = showsBlockNavigator
+        self.navigatorStyle = navigatorStyle
     }
 
     public var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: navigatorStyle.editorSpacing) {
             if showsBlockNavigator {
                 RichTextBlockNavigator(
                     controller: blockNavigator,
                     focusedBlockID: state.focusedBlockID,
+                    style: navigatorStyle,
                     onSelect: focusBlock
                 )
             }
