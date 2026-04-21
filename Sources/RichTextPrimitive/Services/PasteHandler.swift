@@ -2,6 +2,15 @@ import ClipboardPrimitive
 import Foundation
 import UniformTypeIdentifiers
 
+private enum PasteHandlerRegex {
+    static let htmlBlock = try! NSRegularExpression(
+        pattern: #"<(h[1-6]|p|div|blockquote|pre|li)\b[^>]*>(.*?)</\1\s*>|<hr\b[^>]*\/?>"#,
+        options: [.caseInsensitive, .dotMatchesLineSeparators]
+    )
+    static let decimalEntity = try! NSRegularExpression(pattern: #"&#(\d+);"#)
+    static let hexadecimalEntity = try! NSRegularExpression(pattern: #"&#x([0-9a-fA-F]+);"#)
+}
+
 public struct PasteHandler: Sendable {
     public init() {}
 
@@ -73,15 +82,9 @@ public struct PasteHandler: Sendable {
 
     public func blocks(fromHTML html: String) -> [Block] {
         let normalized = normalizeHTML(html)
-        guard let blockPattern = try? NSRegularExpression(
-            pattern: #"<(h[1-6]|p|div|blockquote|pre|li)\b[^>]*>(.*?)</\1\s*>|<hr\b[^>]*\/?>"#,
-            options: [.caseInsensitive, .dotMatchesLineSeparators]
-        ) else {
-            return blocks(from: htmlText(normalized))
-        }
 
         let fullRange = NSRange(normalized.startIndex..., in: normalized)
-        let matches = blockPattern.matches(in: normalized, range: fullRange)
+        let matches = PasteHandlerRegex.htmlBlock.matches(in: normalized, range: fullRange)
         guard !matches.isEmpty else {
             return blocks(from: htmlText(normalized))
         }
@@ -265,18 +268,16 @@ public struct PasteHandler: Sendable {
             .replacingOccurrences(of: "&#39;", with: "'")
             .replacingOccurrences(of: "&apos;", with: "'")
 
-        decoded = decodeNumericHTMLEntities(in: decoded, pattern: #"&#(\d+);"#, radix: 10)
-        decoded = decodeNumericHTMLEntities(in: decoded, pattern: #"&#x([0-9a-fA-F]+);"#, radix: 16)
+        decoded = decodeNumericHTMLEntities(in: decoded, regex: PasteHandlerRegex.decimalEntity, radix: 10)
+        decoded = decodeNumericHTMLEntities(in: decoded, regex: PasteHandlerRegex.hexadecimalEntity, radix: 16)
         return decoded
     }
 
     private func decodeNumericHTMLEntities(
         in text: String,
-        pattern: String,
+        regex: NSRegularExpression,
         radix: Int
     ) -> String {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
-
         var decoded = text
         let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed()
         for match in matches {
