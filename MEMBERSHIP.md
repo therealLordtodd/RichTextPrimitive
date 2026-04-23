@@ -27,7 +27,7 @@ This primitive is a member of the Document Editor primitive family. It defines t
 
 1. Changes to the RichText block model are HIGH-RIPPLE — affects DocumentPrimitive's composition + RichTextEditorKit's re-exports + hosts.
 2. Changes to editor operations (block manipulation, paste-special, cursor semantics): affects editor UX across every consumer.
-3. Consult [dependency audit §5](../docs/plans/2026-04-19-document-editor-dependency-audit.md) for the full ripple map.
+3. Consult [dependency audit §5](../RichTextEditorKit/docs/plans/2026-04-19-document-editor-dependency-audit.md) for the full ripple map.
 4. Typography re-exposure (RichText surfaces some Typography types): changes to those re-exports follow TypographyPrimitive's ripple rules.
 5. Document ripple impact in the commit/PR.
 
