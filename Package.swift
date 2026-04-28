@@ -6,7 +6,7 @@ let package = Package(
     name: "RichTextPrimitive",
     platforms: [
         .macOS(.v15),
-        .iOS(.v17),
+        .iOS(.v15),
     ],
     products: [
         .library(name: "RichTextPrimitive", targets: ["RichTextPrimitive"]),

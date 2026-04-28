@@ -10,8 +10,9 @@ RichTextPrimitive is the cross-platform block rich text editor foundation. It ow
 - `Tests/RichTextPrimitiveAITests`: AI tool tests.
 
 ## Architecture Rules
+- **Platform floor:** macOS 15 / iOS 15 (macOS pinned by `SpellCheckKit` and `TypographyPrimitive`; cannot drop further).
 - `RichTextDataSource` is the mutation boundary. Views and services should mutate through data-source methods rather than editing arrays behind the source.
-- `RichTextEditor` must remain cross-platform for macOS 15 and iOS 17. AppKit/UIKit specifics belong under platform/internal seams.
+- `RichTextEditor` must remain cross-platform for macOS 15 and iOS 15. AppKit/UIKit specifics belong under platform/internal seams.
 - The optional block navigator rail must stay driven by the same `RichTextDataSource`; do not introduce a second source of truth for reorder UI.
 - The TextKit 2 bridge in `RichTextContentBridge` is the source for rendered attributed storage. Keep macOS and iOS layout-manager attachment paths symmetric.
 - `TextSelection.blockSelection` is a real selection mode, not a placeholder. Platform bridges must resolve it to a visible range and scroll target for review/object focus.
