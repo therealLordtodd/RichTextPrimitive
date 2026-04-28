@@ -31,3 +31,18 @@ RichTextPrimitive is the cross-platform block rich text editor foundation. It ow
 - Standard states: Backlog `10f842a8-e105-4534-a3db-24f8ba5e08eb`, Todo `9db54ee3-8815-4c88-a82c-17c0d4ce0d06`, In Progress `2096cd1e-c8a1-4463-9408-2af7e53d377d`, Done `bd9673ad-920b-4da3-ac0d-3de88b516fd7`, Cancelled `a8ae0d1f-2676-44d3-98da-772307d50e17`
 - `Code Review` module exists for this project.
 - Follow-up note already filed: `RTP-1` — use `FilterPrimitive` for structured review and navigation filters.
+
+---
+
+## Family Membership — Document Editor
+
+This primitive is a member of the Document Editor primitive family. It participates in shared conventions and consumes or publishes cross-primitive types used by the rich-text / document / editor stack.
+
+**Before modifying public API, shared conventions, or cross-primitive types, consult:**
+- `../RichTextEditorKit/docs/plans/2026-04-19-document-editor-dependency-audit.md` — who depends on whom, who uses which conventions
+- `/Users/todd/Programming/Packages/CONVENTIONS/` — shared patterns this primitive participates in
+- `./MEMBERSHIP.md` in this primitive's root — specific list of conventions, shared types, and sibling consumers
+
+**Changes that alter public API, shared type definitions, or convention contracts MUST include a ripple-analysis section in the commit or PR description** identifying which siblings could be affected and how.
+
+Standalone consumers (apps just importing this primitive) are unaffected by this discipline — it applies only to modifications to the primitive itself.
