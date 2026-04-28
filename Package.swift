@@ -5,7 +5,7 @@ import PackageDescription
 let package = Package(
     name: "RichTextPrimitive",
     platforms: [
-        .macOS(.v15),
+        .macOS(.v14),
         .iOS(.v15),
     ],
     products: [
