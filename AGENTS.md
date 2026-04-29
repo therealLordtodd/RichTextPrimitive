@@ -3,6 +3,17 @@
 ## Purpose
 RichTextPrimitive is the cross-platform block rich text editor foundation. It owns block and inline models, editor state, data-source mutations, platform editor views, formatting helpers, paste parsing, list continuation, spell-check integration, the optional block navigator reorder rail, and the optional `RichTextPrimitiveAI` tool surface.
 
+## Repositories & Local Paths
+
+| Package | Repository | Local Path |
+|---------|------------|------------|
+| **RichTextPrimitive** | https://github.com/therealLordtodd/RichTextPrimitive.git | `/Users/todd/Building - Apple/Packages/RichTextPrimitive` |
+
+## Build & Test
+
+- **Build:** `swift build`
+- **Test:** `swift test`
+
 ## Key Directories
 - `Sources/RichTextPrimitive`: Core block model, state, services, style system, writing modes, commands, and SwiftUI editor view.
 - `Sources/RichTextPrimitiveAI`: AI context, tool, provider, and block mutation abstractions.
