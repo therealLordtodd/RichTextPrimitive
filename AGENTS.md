@@ -57,3 +57,7 @@ This primitive is a member of the Document Editor primitive family. It participa
 **Changes that alter public API, shared type definitions, or convention contracts MUST include a ripple-analysis section in the commit or PR description** identifying which siblings could be affected and how.
 
 Standalone consumers (apps just importing this primitive) are unaffected by this discipline — it applies only to modifications to the primitive itself.
+
+## Performance posture
+
+Runtime service primitive. Hot paths are the package's public entry points (per-call dispatch / lookup / state update). Concurrency model: deliberate (value type, `Sendable` class, or actor-fronted as the source documents). Allocations on the hot path are kept light. Reviewed 2026-04-29 (Speed & Clarity round 1, baseline pass); deeper review queued for round 2.
