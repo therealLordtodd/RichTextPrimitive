@@ -60,4 +60,14 @@ Standalone consumers (apps just importing this primitive) are unaffected by this
 
 ## Performance posture
 
-Runtime service primitive. Hot paths are the package's public entry points (per-call dispatch / lookup / state update). Concurrency model: deliberate (value type, `Sendable` class, or actor-fronted as the source documents). Allocations on the hot path are kept light. Reviewed 2026-04-29 (Speed & Clarity round 1, baseline pass); deeper review queued for round 2.
+Editor primitive on the per-keystroke hot path of every host that renders a rich-text surface. The package straddles two cost regimes: the in-memory block model (cheap, value-type) and the TextKit 2 bridge (allocation-heavy by nature, owned by AppKit/UIKit).
+
+- **Hot paths:**
+  - `ArrayRichTextDataSource` mutation methods (`insertBlocks`, `deleteBlocks`, `moveBlocks`, `replaceBlock`, `updateTextContent`, `updateBlockType`) — called per keystroke, per paste, per drag-drop. Each mutation fans out to registered observers via the `RichTextMutation` channel.
+  - `RichTextContentBridge` — TextKit 2 bridge that maps `Block` arrays to `NSAttributedString` storage. The macOS and iOS layout-manager attachment paths must stay symmetric or one platform pays an O(blocks) re-layout per edit.
+  - `SpellCheckingService` — runs against changed ranges, not full documents; the `SpellChecker` protocol seam exists so tests skip the system spell checker entirely.
+  - `PasteHandler` and `ListContinuation` — invoked once per paste / once per Return-key, not per character. Cost is amortized.
+- **Concurrency model:** the editor is `@MainActor`-bound end-to-end. `RichTextState` is `@MainActor @Observable final class`; `RichTextDataSource` is a `@MainActor` protocol with `AnyObject` + `Observable` constraints; `ArrayRichTextDataSource` is `@MainActor @Observable final class`. This is deliberate — TextKit 2, AppKit's `NSTextView`, and UIKit's `UITextView` are all main-thread-only, so pushing the editor model off the main actor would only buy thread hops. `Block`, `BlockContent`, `TextContent`, `TextRun`, and `TextAttributes` are `Sendable` value types so snapshots cross actor boundaries cleanly when a host wants to persist or diff outside the editor.
+- **Allocation discipline:** per-mutation, the data source rebuilds the affected `Block` (value type, COW semantics on the contained `[TextRun]`), notifies observers via `[UUID: closure]` lookup, and the bridge re-renders the changed range. The block-navigator rail is driven by the same data source — no second observer chain. The undo stack snapshots `[Block]` arrays; for a multi-megabyte document these snapshots are the dominant per-edit allocation, mitigated by the host's undo-coalescing policy. The `RichTextPrimitiveAI` target is opt-in and adds zero cost when a host doesn't link it.
+
+Reviewed 2026-04-29 (Speed & Clarity round 1, baseline pass); rewritten 2026-05-03 (portfolio sweep — concrete prose).
