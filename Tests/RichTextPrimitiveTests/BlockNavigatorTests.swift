@@ -58,4 +58,20 @@ struct BlockNavigatorTests {
         #expect(dataSource.blocks.map(\.id) == ["b", "c", "a"])
         #expect(controller.items.map(\.id) == ["b", "c", "a"])
     }
+
+    @Test func navigatorItemAccessibilityValueIncludesBlockContext() {
+        let block = Block(
+            id: "heading",
+            type: .heading,
+            content: .heading(
+                .plain("Launch Plan\nThe longer subtitle line"),
+                level: 2
+            )
+        )
+
+        let item = RichTextBlockNavigatorItem(index: 2, block: block)
+
+        #expect(item.accessibilityValue(isFocused: false) == "Heading 2, block 3, Launch Plan")
+        #expect(item.accessibilityValue(isFocused: true) == "Heading 2, block 3, Launch Plan, focused")
+    }
 }

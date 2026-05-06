@@ -71,6 +71,23 @@ struct RichTextBlockNavigatorItem: Identifiable, Equatable, Sendable {
         self.subtitle = Self.subtitle(for: block.content)
     }
 
+    func accessibilityValue(isFocused: Bool) -> String {
+        var parts = [
+            kindLabel,
+            "block \(index + 1)"
+        ]
+
+        if let subtitle {
+            parts.append(subtitle)
+        }
+
+        if isFocused {
+            parts.append("focused")
+        }
+
+        return parts.joined(separator: ", ")
+    }
+
     private static func iconName(for type: BlockType) -> String {
         switch type {
         case .paragraph:
@@ -295,7 +312,9 @@ struct RichTextBlockNavigator: View {
         .onTapGesture {
             onSelect(item.id)
         }
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel(item.title)
+        .accessibilityValue(item.accessibilityValue(isFocused: focusedBlockID == item.id))
         .accessibilityHint("Select this block in the editor")
     }
 

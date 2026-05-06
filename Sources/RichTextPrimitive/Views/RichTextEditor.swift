@@ -3,13 +3,29 @@ import SpellCheckKit
 import SwiftUI
 
 public struct RichTextEditor: View {
+    @Environment(\.richTextNavigatorStyle) private var environmentNavigatorStyle
     @Bindable private var state: RichTextState
     @StateObject private var blockNavigator = RichTextBlockNavigatorController()
     private let dataSource: any RichTextDataSource
     private let styleSheet: TextStyleSheet
     private let spellChecker: (any SpellChecker)?
     private let showsBlockNavigator: Bool
-    private let navigatorStyle: RichTextNavigatorStyle
+    private let navigatorStyleOverride: RichTextNavigatorStyle?
+
+    public init(
+        state: RichTextState,
+        dataSource: any RichTextDataSource,
+        styleSheet: TextStyleSheet = .standard,
+        spellChecker: (any SpellChecker)? = SystemSpellChecker(),
+        showsBlockNavigator: Bool = false
+    ) {
+        self.state = state
+        self.dataSource = dataSource
+        self.styleSheet = styleSheet
+        self.spellChecker = spellChecker
+        self.showsBlockNavigator = showsBlockNavigator
+        self.navigatorStyleOverride = nil
+    }
 
     public init(
         state: RichTextState,
@@ -17,17 +33,18 @@ public struct RichTextEditor: View {
         styleSheet: TextStyleSheet = .standard,
         spellChecker: (any SpellChecker)? = SystemSpellChecker(),
         showsBlockNavigator: Bool = false,
-        navigatorStyle: RichTextNavigatorStyle = .default
+        navigatorStyle: RichTextNavigatorStyle
     ) {
         self.state = state
         self.dataSource = dataSource
         self.styleSheet = styleSheet
         self.spellChecker = spellChecker
         self.showsBlockNavigator = showsBlockNavigator
-        self.navigatorStyle = navigatorStyle
+        self.navigatorStyleOverride = navigatorStyle
     }
 
     public var body: some View {
+        let navigatorStyle = navigatorStyleOverride ?? environmentNavigatorStyle
         HStack(alignment: .top, spacing: navigatorStyle.editorSpacing) {
             if showsBlockNavigator {
                 RichTextBlockNavigator(
@@ -44,7 +61,11 @@ public struct RichTextEditor: View {
                 styleSheet: styleSheet,
                 spellIssues: state.spellIssues
             )
+            .accessibilityLabel("Rich text editor content")
+            .accessibilityHint("Edit rich text document blocks")
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Rich text editor")
         .task(id: blockNavigatorTaskID) {
             if showsBlockNavigator {
                 blockNavigator.bind(to: dataSource)

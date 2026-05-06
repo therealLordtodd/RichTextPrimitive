@@ -4,8 +4,8 @@ import SwiftUI
 /// Injectable style tokens for the block navigator rail.
 ///
 /// All properties have sensible defaults that match the original hardcoded
-/// appearance. Pass a custom instance to ``RichTextEditor/init(state:dataSource:styleSheet:spellChecker:showsBlockNavigator:navigatorStyle:)``
-/// to adjust spacing, colors, fonts, and radii without subclassing.
+/// appearance. Hosts can inject this through ``View/richTextNavigatorStyle(_:)``
+/// or pass a one-off override to ``RichTextEditor``.
 public struct RichTextNavigatorStyle: Sendable {
 
     // MARK: - Layout
@@ -139,5 +139,24 @@ public struct RichTextNavigatorStyle: Sendable {
         self.kindFont = kindFont
         self.subtitleFont = subtitleFont
         self.reorderableStyle = reorderableStyle
+    }
+}
+
+private struct RichTextNavigatorStyleKey: EnvironmentKey {
+    static let defaultValue: RichTextNavigatorStyle = .default
+}
+
+public extension EnvironmentValues {
+    /// Environment-provided style tokens for the RichTextPrimitive block navigator.
+    var richTextNavigatorStyle: RichTextNavigatorStyle {
+        get { self[RichTextNavigatorStyleKey.self] }
+        set { self[RichTextNavigatorStyleKey.self] = newValue }
+    }
+}
+
+public extension View {
+    /// Injects style tokens for RichTextPrimitive block navigator surfaces.
+    func richTextNavigatorStyle(_ style: RichTextNavigatorStyle) -> some View {
+        environment(\.richTextNavigatorStyle, style)
     }
 }

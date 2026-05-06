@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import RichTextPrimitive
 
@@ -16,5 +17,21 @@ struct StyleTests {
         let styleSheet = TextStyleSheet.standard
         #expect(styleSheet.headingStyle(level: 1).fontSize == 30)
         #expect(styleSheet.headingStyle(level: 99) == styleSheet.defaultStyle)
+    }
+
+    @Test func navigatorStyleCanBeProvidedThroughEnvironment() {
+        let state = RichTextState()
+        let dataSource = ArrayRichTextDataSource()
+        let style = RichTextNavigatorStyle(navigatorWidth: 180)
+
+        _ = RichTextEditor(
+            state: state,
+            dataSource: dataSource,
+            spellChecker: nil,
+            showsBlockNavigator: true
+        )
+        .richTextNavigatorStyle(style)
+
+        #expect(style.navigatorWidth == 180)
     }
 }
