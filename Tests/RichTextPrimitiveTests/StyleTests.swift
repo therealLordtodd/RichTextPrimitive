@@ -19,6 +19,15 @@ struct StyleTests {
         #expect(styleSheet.headingStyle(level: 99) == styleSheet.defaultStyle)
     }
 
+    @Test func packageChromeLocalizationResolvesDefaultResources() {
+        #expect(RichTextPrimitiveStrings.editorAccessibilityLabel == "Rich text editor")
+        #expect(RichTextPrimitiveStrings.headingKind(level: 2) == "Heading 2")
+        #expect(RichTextPrimitiveStrings.listKind(style: .numbered) == "Numbered List")
+        #expect(RichTextPrimitiveStrings.blockPosition(3) == "block 3")
+        #expect(RichTextPrimitiveStrings.tableSubtitle(rowCount: 1, columnCount: 2) == "1 row, 2 columns")
+        #expect(RichTextPrimitiveStrings.imageSize(width: 640, height: 480) == "640 x 480")
+    }
+
     @Test func navigatorStyleCanBeProvidedThroughEnvironment() {
         let state = RichTextState()
         let dataSource = ArrayRichTextDataSource()

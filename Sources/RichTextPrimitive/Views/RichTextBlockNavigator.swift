@@ -74,7 +74,7 @@ struct RichTextBlockNavigatorItem: Identifiable, Equatable, Sendable {
     func accessibilityValue(isFocused: Bool) -> String {
         var parts = [
             kindLabel,
-            "block \(index + 1)"
+            RichTextPrimitiveStrings.blockPosition(index + 1)
         ]
 
         if let subtitle {
@@ -82,7 +82,7 @@ struct RichTextBlockNavigatorItem: Identifiable, Equatable, Sendable {
         }
 
         if isFocused {
-            parts.append("focused")
+            parts.append(RichTextPrimitiveStrings.focusedAccessibilityValue)
         }
 
         return parts.joined(separator: ", ")
@@ -114,37 +114,37 @@ struct RichTextBlockNavigatorItem: Identifiable, Equatable, Sendable {
     private static func kindLabel(for type: BlockType, content: BlockContent) -> String {
         switch content {
         case let .heading(_, level):
-            "Heading \(level)"
+            RichTextPrimitiveStrings.headingKind(level: level)
         case let .list(_, style, _):
-            "\(style.rawValue.capitalized) List"
+            RichTextPrimitiveStrings.listKind(style: style)
         case let .embed(embed):
             embed.kind.uppercased()
         default:
             switch type {
             case .paragraph:
-                "Paragraph"
+                RichTextPrimitiveStrings.paragraphKind
             case .heading:
-                "Heading"
+                RichTextPrimitiveStrings.headingKind
             case .blockQuote:
-                "Quote"
+                RichTextPrimitiveStrings.quoteKind
             case .codeBlock:
-                "Code"
+                RichTextPrimitiveStrings.codeKind
             case .list:
-                "List"
+                RichTextPrimitiveStrings.listKind
             case .table:
-                "Table"
+                RichTextPrimitiveStrings.tableKind
             case .image:
-                "Image"
+                RichTextPrimitiveStrings.imageKind
             case .divider:
-                "Divider"
+                RichTextPrimitiveStrings.dividerKind
             case .embed:
-                "Embed"
+                RichTextPrimitiveStrings.embedKind
             }
         }
     }
 
     private static func title(for content: BlockContent) -> String {
-        let fallback = "Untitled Block"
+        let fallback = RichTextPrimitiveStrings.untitledBlockTitle
         switch content {
         case let .text(text),
              let .heading(text, _),
@@ -152,15 +152,17 @@ struct RichTextBlockNavigatorItem: Identifiable, Equatable, Sendable {
              let .list(text, _, _):
             return firstMeaningfulLine(in: text.plainText) ?? fallback
         case let .codeBlock(code, language):
-            let prefix = language?.uppercased() ?? "Code"
-            return firstMeaningfulLine(in: code).map { "\(prefix): \($0)" } ?? prefix
+            let prefix = language?.uppercased() ?? RichTextPrimitiveStrings.codeKind
+            return firstMeaningfulLine(in: code).map {
+                RichTextPrimitiveStrings.codeBlockTitle(language: prefix, preview: $0)
+            } ?? prefix
         case let .table(table):
             if let caption = table.caption?.plainText,
                let firstLine = firstMeaningfulLine(in: caption) {
                 return firstLine
             }
             let columnCount = table.rows.map(\.count).max() ?? 0
-            return "Table \(table.rows.count)x\(columnCount)"
+            return RichTextPrimitiveStrings.tableTitle(rowCount: table.rows.count, columnCount: columnCount)
         case let .image(image):
             if let altText = firstMeaningfulLine(in: image.altText) {
                 return altText
@@ -169,9 +171,9 @@ struct RichTextBlockNavigatorItem: Identifiable, Equatable, Sendable {
                !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return url
             }
-            return "Image"
+            return RichTextPrimitiveStrings.imageKind
         case .divider:
-            return "Section Divider"
+            return RichTextPrimitiveStrings.sectionDividerTitle
         case let .embed(embed):
             if let title = metadataString(["title", "name", "filename"], metadata: embed.metadata) {
                 return title
@@ -199,10 +201,10 @@ struct RichTextBlockNavigatorItem: Identifiable, Equatable, Sendable {
             }
             let rowCount = table.rows.count
             let columnCount = table.rows.map(\.count).max() ?? 0
-            return "\(rowCount) rows, \(columnCount) columns"
+            return RichTextPrimitiveStrings.tableSubtitle(rowCount: rowCount, columnCount: columnCount)
         case let .image(image):
             if let size = image.size {
-                return "\(Int(size.width)) x \(Int(size.height))"
+                return RichTextPrimitiveStrings.imageSize(width: Int(size.width), height: Int(size.height))
             }
             return image.url?.pathExtension.uppercased()
         case .divider:
@@ -270,7 +272,7 @@ struct RichTextBlockNavigator: View {
                 style.backgroundColor,
                 in: RoundedRectangle(cornerRadius: style.navigatorCornerRadius, style: .continuous)
             )
-            .accessibilityLabel("Block navigator")
+            .accessibilityLabel(RichTextPrimitiveStrings.blockNavigatorAccessibilityLabel)
         }
     }
 
@@ -287,7 +289,7 @@ struct RichTextBlockNavigator: View {
                         .font(style.titleFont)
                         .lineLimit(1)
                     Spacer(minLength: 0)
-                    Text("\(item.index + 1)")
+                    Text(verbatim: "\(item.index + 1)")
                         .font(style.indexFont)
                         .foregroundStyle(.secondary)
                 }
@@ -315,7 +317,7 @@ struct RichTextBlockNavigator: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(item.title)
         .accessibilityValue(item.accessibilityValue(isFocused: focusedBlockID == item.id))
-        .accessibilityHint("Select this block in the editor")
+        .accessibilityHint(RichTextPrimitiveStrings.blockNavigatorRowAccessibilityHint)
     }
 
     @ViewBuilder

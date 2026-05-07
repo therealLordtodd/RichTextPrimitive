@@ -4,6 +4,7 @@ import PackageDescription
 
 let package = Package(
     name: "RichTextPrimitive",
+    defaultLocalization: "en",
     platforms: [
         .macOS(.v14),
         .iOS(.v17),
@@ -34,7 +35,8 @@ let package = Package(
                 .product(name: "SpellCheckKit", package: "SpellCheckKit"),
                 .product(name: "SyntaxHighlightPrimitive", package: "SyntaxHighlightPrimitive"),
                 .product(name: "TypographyPrimitive", package: "TypographyPrimitive"),
-            ]
+            ],
+            resources: [.process("Resources")]
         ),
         .target(
             name: "RichTextPrimitiveAI",

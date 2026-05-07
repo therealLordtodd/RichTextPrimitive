@@ -61,11 +61,11 @@ public struct RichTextEditor: View {
                 styleSheet: styleSheet,
                 spellIssues: state.spellIssues
             )
-            .accessibilityLabel("Rich text editor content")
-            .accessibilityHint("Edit rich text document blocks")
+            .accessibilityLabel(RichTextPrimitiveStrings.editorContentAccessibilityLabel)
+            .accessibilityHint(RichTextPrimitiveStrings.editorContentAccessibilityHint)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Rich text editor")
+        .accessibilityLabel(RichTextPrimitiveStrings.editorAccessibilityLabel)
         .task(id: blockNavigatorTaskID) {
             if showsBlockNavigator {
                 blockNavigator.bind(to: dataSource)
